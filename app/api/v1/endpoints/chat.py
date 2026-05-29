@@ -40,9 +40,10 @@ async def chat(request: ChatRequest):
     # 동기 경로: 전체 답변을 만들어 한 번에 반환.
     result = await run_chat_sync(request)
     response = ChatResponse(
-        conversation_id=request.conversation_id or str(uuid4()),
+        session_id=request.session_id or str(uuid4()),
         answer=result["answer"],
         citations=result.get("citations", []),
         rag_mode=request.rag_mode,
+        model=result["model"],
     )
     return JSONResponse(response.model_dump())

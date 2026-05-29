@@ -37,6 +37,8 @@ dependencies = [
     "pyyaml>=6.0.2",
     "structlog>=24.4.0",
     "langfuse>=2.53.0",        # LLM 트레이싱
+    "sentence-transformers>=5.5.1",
+    "pypdf>=6.12.2",
 ]
 
 # 개발 전용 의존성 (PEP 735). `uv sync` 시 기본 설치, `uv sync --no-dev` 로 제외.

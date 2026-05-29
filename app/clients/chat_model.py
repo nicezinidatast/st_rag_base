@@ -20,7 +20,8 @@
 """
 from __future__ import annotations
 
-from typing import AsyncIterator, Callable, Protocol, runtime_checkable
+from collections.abc import AsyncIterator, Callable
+from typing import Protocol, runtime_checkable
 
 from app.core.config import settings
 
@@ -88,5 +89,6 @@ def _build_openai(model: str) -> ChatModel:
 
 @register("anthropic")
 def _build_anthropic(model: str) -> ChatModel:
-    # TODO: anthropic SDK 래퍼 반환
-    raise NotImplementedError("anthropic ChatModel 빌더 미구현")
+    from app.clients.anthropic_client import AnthropicChatModel
+
+    return AnthropicChatModel(model)

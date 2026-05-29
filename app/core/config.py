@@ -71,8 +71,10 @@ class Settings(BaseSettings):
 
     # ── 기본 모델 선택 (팩토리의 default) ─────────────────────
     # "provider:model" 또는 단순 모델명. 팩토리 구현 시 파싱 규칙을 정할 것.
-    DEFAULT_CHAT_MODEL: str = "openai:gpt-4o-mini"
-    DEFAULT_EMBEDDING_MODEL: str = "openai:text-embedding-3-small"
+    DEFAULT_CHAT_MODEL: str = "anthropic:claude-haiku-4-5-20251001"
+    # 기본은 무료 로컬 임베딩(bge-m3, API 키 불필요). 다른 프로바이더로 바꾸려면
+    # .env 에서 "openai:text-embedding-3-small" 처럼 지정한다.
+    DEFAULT_EMBEDDING_MODEL: str = "st:BAAI/bge-m3"
     DEFAULT_RERANK_MODEL: str = "cohere:rerank-multilingual-v3.0"
 
     # ── 관측성 (Langfuse LLM 트레이싱) ────────────────────────
