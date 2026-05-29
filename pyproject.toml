@@ -1,0 +1,79 @@
+[project]
+name = "nicechat-base"
+version = "0.1.0"
+description = "NICECHAT_BASE — RAG AI 챗봇 공통 백엔드 (hybrid Vector + Graph RAG, reused across projects)"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "Your Team", email = "dev@example.com" }]
+
+# 런타임 의존성. 정확한 버전은 uv.lock 이 고정한다(아래는 하한선만).
+# 프로바이더 SDK(openai/anthropic/cohere 등)는 필요한 것만 남겨도 된다.
+dependencies = [
+    # --- Web / ASGI ---
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "pydantic>=2.9.0",
+    "pydantic-settings>=2.6.0",
+    "sse-starlette>=2.1.3",
+    # --- HTTP client ---
+    "httpx>=0.27.0",
+    # --- Datastores ---
+    "sqlalchemy>=2.0.0",
+    "asyncpg>=0.30.0",
+    "alembic>=1.13.0",
+    "redis>=5.1.0",
+    # --- Vector / Graph DB clients (배포별 교체) ---
+    "qdrant-client>=1.12.0",
+    "neo4j>=5.25.0",
+    # --- LLM / Orchestration ---
+    "openai>=1.54.0",
+    "anthropic>=0.39.0",
+    "cohere>=5.11.0",          # Command / Rerank
+    "langgraph>=0.2.0",
+    "langchain-core>=0.3.0",   # LangGraph 메시지/콜백 타입
+    # --- IR utilities ---
+    "rank-bm25>=0.2.2",
+    # --- Config / Observability ---
+    "pyyaml>=6.0.2",
+    "structlog>=24.4.0",
+    "langfuse>=2.53.0",        # LLM 트레이싱
+]
+
+# 개발 전용 의존성 (PEP 735). `uv sync` 시 기본 설치, `uv sync --no-dev` 로 제외.
+[dependency-groups]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-cov>=5.0.0",
+    "ruff>=0.7.0",
+    "mypy>=1.13.0",
+    "pre-commit>=4.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# 빌드 시 포함할 패키지(루트의 app/). config·migration 은 런타임에 별도 배치.
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.uv]
+# uv 전용 설정 자리. 예) 특정 인덱스/소스 지정 시 여기에.
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
+
+[tool.mypy]
+python_version = "3.11"
+plugins = ["pydantic.mypy"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-ra --cov=app --cov-report=term-missing"

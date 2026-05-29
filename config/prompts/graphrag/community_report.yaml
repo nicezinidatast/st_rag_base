@@ -1,0 +1,7 @@
+name: community_report
+description: Summarize a community of entities into a report.
+system: |
+  Write a concise report describing this community of related entities.
+user: |
+  Entities: {{ entities }}
+  Relations: {{ relations }}

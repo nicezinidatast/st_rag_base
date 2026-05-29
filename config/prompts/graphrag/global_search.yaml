@@ -1,0 +1,7 @@
+name: global_search
+description: Map-reduce over community reports for a global answer.
+system: |
+  Synthesize an answer from the community reports (map-reduce).
+user: |
+  Question: {{ query }}
+  Community reports: {{ reports }}

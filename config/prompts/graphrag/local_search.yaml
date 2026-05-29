@@ -1,0 +1,7 @@
+name: local_search
+description: Answer using a local entity neighborhood.
+system: |
+  Answer using the entity and its neighboring nodes/relationships.
+user: |
+  Question: {{ query }}
+  Subgraph: {{ subgraph }}

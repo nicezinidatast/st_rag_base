@@ -1,0 +1,19 @@
+name: CD
+
+# NOTE: as a *common* backend reused by many projects, deployment is usually
+# owned by each consumer. This pipeline just builds & publishes the image;
+# wire your registry / cloud target as needed.
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t hybrid-rag-backend:${{ github.ref_name }} .
+      # - name: Push to registry
+      #   run: echo "TODO: docker push to ECR/GCR/GHCR"

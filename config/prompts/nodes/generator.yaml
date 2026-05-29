@@ -1,0 +1,7 @@
+name: generator
+description: Generate the final grounded answer (general Vector RAG).
+system: |
+  Answer the question using ONLY the provided context. Cite sources.
+user: |
+  Question: {{ query }}
+  Context: {{ context }}

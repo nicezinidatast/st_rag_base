@@ -1,0 +1,57 @@
+# ───────── Python ─────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# ───────── 가상환경 / uv ─────────
+.venv/
+venv/
+env/
+# uv 캐시/환경은 무시. 단 uv.lock 은 *반드시 커밋* (재현성). 그래서 여기 넣지 않음.
+.uv/
+
+# ───────── 환경변수 / 시크릿 ─────────
+.env
+.env.*
+!.env.example
+
+# ───────── 테스트 / 린트 / 타입 캐시 ─────────
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.cache/
+
+# ───────── 빌드 산출물 ─────────
+dist/
+build/
+*.egg-info/
+.eggs/
+
+# ───────── 데이터 / 모델 / 인덱스 (로컬 전용) ─────────
+data/samples/*
+!data/samples/.gitkeep
+*.sqlite3
+*.db
+
+# ───────── 로그 ─────────
+logs/
+*.log
+
+# ───────── 도구 상태 (OMC 등, 로컬 전용) ─────────
+.omc/
+
+# ───────── IDE / 에디터 ─────────
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ───────── OS ─────────
+.DS_Store
+Thumbs.db
+desktop.ini

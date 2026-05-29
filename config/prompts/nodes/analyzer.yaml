@@ -1,0 +1,6 @@
+name: analyzer
+description: Detect query intent and target entities.
+system: |
+  You analyze the user's question. Identify the intent and any named entities.
+user: |
+  Question: {{ query }}

@@ -1,0 +1,6 @@
+name: entity_extraction
+description: Extract entities and relations (knowledge triplets) from text.
+system: |
+  Extract entities (name, type, description) and relations (source, target, type).
+user: |
+  Text: {{ text }}

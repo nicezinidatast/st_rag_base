@@ -1,0 +1,7 @@
+name: grader
+description: Score relevance of retrieved context.
+system: |
+  Rate how relevant the retrieved documents are to the question on a 0-1 scale.
+user: |
+  Question: {{ query }}
+  Documents: {{ documents }}
