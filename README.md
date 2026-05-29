@@ -145,7 +145,7 @@ docker compose up -d neo4j              # Phase 9: GraphRAG
 - 🔍 `curl -N` 로 SSE 프레임이 끊겨 들어오는지 확인.
   > `generator` vs `EventSourceResponse` 구분이 헷갈리면 `utils/streaming.py` 상단 주석 참고.
 
-### Phase 3 — Vector RAG 최소 동작 (Qdrant + dense 검색)
+### [x] Phase 3 — Vector RAG 최소 동작 (Qdrant + dense 검색)
 - 🎯 문서를 적재하고, 검색된 컨텍스트를 프롬프트에 넣어 답한다. **여기서부터 진짜 RAG.**
 - 🛠 `clients/embedding.py`(openai Embedder) → `core/vector_db.py`(Qdrant 연결)
   → `ir/vector/ingest.py`(청킹+임베딩+upsert) → `ir/vector/search.py`(dense만)
