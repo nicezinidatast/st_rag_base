@@ -125,7 +125,7 @@ docker compose up -d neo4j              # Phase 9: GraphRAG
 
 ---
 
-### Phase 0 — 그대로 부팅 (현재 상태, 구현 0줄)
+### [x] Phase 0 — 그대로 부팅 (현재 상태, 구현 0줄)
 - 🎯 받자마자 서버가 뜨는지 확인하고 출발선을 잡는다.
 - 🛠 (없음 — 그대로)
 - ✅ `GET /api/v1/health` 가 200. 미들웨어(trace id/로그)가 이미 동작.
@@ -138,7 +138,7 @@ docker compose up -d neo4j              # Phase 9: GraphRAG
 - ✅ `POST /api/v1/chat` 에 `{"stream": false}` 로 호출 → 동기 JSON 답변.
 - 🔍 curl 로 `stream=false` 요청 → `answer` 필드 확인. **이 시점에서 이미 "동작하는 챗봇".**
 
-### Phase 2 — SSE 토큰 스트리밍 추가
+### [x] Phase 2 — SSE 토큰 스트리밍 추가
 - 🎯 같은 챗을 토큰 단위로 흘려보낸다. (동기 경로는 그대로 둔다 — 둘 다 지원)
 - 🛠 `clients/openai_client.ChatModel.astream` 구현 → `utils/streaming.stream_chat`(generator)
 - ✅ `{"stream": true}` → SSE 로 토큰이 한 조각씩. Phase 1 의 동기 경로도 여전히 동작.
