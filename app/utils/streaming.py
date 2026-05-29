@@ -106,6 +106,18 @@ async def run_chat_sync(request: Any) -> dict:
     endpoints/chat.py 에서 이 반환값을 ChatResponse 로 직렬화한다.
     """
     from app.clients.chat_model import get_chat_model
+    from app.core.config import settings
+
+    # [개발 편의 가드] 키가 없으면 OpenAI 가 난해한 인증 에러를 던지므로,
+    # 대신 무엇을 해야 하는지 알려주는 답변을 그대로 돌려준다. (키 채우면 자동 해제)
+    if not settings.OPENAI_API_KEY:
+        return {
+            "answer": (
+                "OpenAI API key 가 설정되지 않았습니다. "
+                ".env 의 OPENAI_API_KEY 를 입력하세요."
+            ),
+            "citations": [],
+        }
 
     chat_model = get_chat_model()  # settings.DEFAULT_CHAT_MODEL 사용
     messages = [{"role": m.role, "content": m.content} for m in request.messages]
