@@ -41,6 +41,11 @@ class Settings(BaseSettings):
     # ── Redis (세션/대화이력/시맨틱 캐시) ─────────────────────
     REDIS_URL: str = "redis://localhost:6379/0"
 
+    # ── 개발/테스트 토글 ──────────────────────────────────────
+    # MOCK_RETRIEVER: true 면 실제 Vector 검색 대신 MockRetriever 가
+    # 포켓몬 가상 문서 5건을 고정 반환한다(Qdrant/임베딩 없이 RAG 흐름 점검용).
+    MOCK_RETRIEVER: bool = False
+
     # ── Vector DB (기본 Qdrant, 배포별 교체 가능) ─────────────
     VECTOR_DB_URL: str = "http://localhost:6333"
     VECTOR_DB_API_KEY: str | None = None

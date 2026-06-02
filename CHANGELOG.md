@@ -83,4 +83,13 @@
   출처 = CSS_모델링과정(Advanced)_2일차). **실제 검색 + 출처 동작 확인.**
 - **운영 메모:** 로컬 임베디드 Qdrant 는 단일 프로세스만 점유 → 적재 스크립트 실행 시 API 서버는
   꺼둘 것. 동시 사용/운영은 도커 서버 모드(`VECTOR_DB_URL=http://localhost:6333`)로 전환.
-- **커밋:** _(미커밋)_
+- **부가(요청 5):** **MockRetriever** 추가 — Qdrant/임베딩 인프라 없이 RAG 흐름을 점검.
+  - `app/services/ir/mock.py` — `Retriever` 구현. 쿼리와 무관하게 포켓몬 가상 문서 5건
+    (피카츄·리자몽·꼬부기·뮤츠·이상해씨)을 `RetrievedChunk` 로 고정 반환.
+  - `app/core/config.py` — `MOCK_RETRIEVER: bool = False` 토글.
+  - `app/utils/streaming.py` — `_retrieve_context` 가 `MOCK_RETRIEVER` true 면 `MockRetriever`,
+    아니면 `VectorRetriever` 선택(동기/스트리밍 양쪽 공유).
+  - `.env` — `MOCK_RETRIEVER=false` 기본.
+- **테스트(갱신):** `pytest` 30 passed (커버리지 옵션 제외 시).
+- **커밋:** `ce14e28` feat(clients): pass HF_TOKEN to SentenceTransformer download
+  / _(MockRetriever 커밋 후속)_

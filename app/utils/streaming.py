@@ -82,14 +82,23 @@ async def _retrieve_context(question: str, top_k: int) -> tuple[str, list[dict]]
     적재 전(컬렉션 없음)이거나 결과가 없으면 ("", []) 을 돌려준다 → 컨텍스트 없이 답변.
     검색 인프라(Qdrant/임베딩)가 없거나 실패해도 채팅 자체는 막지 않는다(검색만 건너뜀).
     """
+    from app.core.config import settings
+    from app.services.ir.base import Retriever
     from app.services.ir.vector import search as vsearch
     from app.utils.logger import get_logger
 
     if not question.strip():
         return "", []
 
+    if settings.MOCK_RETRIEVER:
+        from app.services.ir.mock import MockRetriever
+
+        retriever: Retriever = MockRetriever()
+    else:
+        retriever = vsearch.VectorRetriever()
+
     try:
-        chunks = await vsearch.VectorRetriever().retrieve(question, top_k=top_k)
+        chunks = await retriever.retrieve(question, top_k=top_k)
     except Exception as e:  # noqa: BLE001  검색 실패는 치명적이지 않다 → 컨텍스트 없이 진행
         get_logger(__name__).warning("vector retrieve skipped", error=str(e))
         return "", []
