@@ -11,6 +11,9 @@
 from __future__ import annotations
 
 from app.services.workflow.state import AgentState
+from app.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def _build_messages(question: str, context: str) -> list[dict]:
@@ -38,9 +41,12 @@ async def generate(state: AgentState) -> AgentState:
     from app.core.config import settings
 
     spec = state.get("model") or settings.DEFAULT_CHAT_MODEL
+    has_context = bool(state.get("context"))
     messages = _build_messages(state.get("query", ""), state.get("context", ""))
 
+    logger.info("node_generate_start", model=spec, has_context=has_context)
     resp = await get_chat_model(spec).ainvoke(messages)
     content = resp.content
     answer = content if isinstance(content, str) else str(content)
+    logger.info("node_generate_done", model=spec, answer_chars=len(answer))
     return {"answer": answer, "model": spec}

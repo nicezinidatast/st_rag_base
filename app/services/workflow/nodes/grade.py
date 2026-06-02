@@ -10,9 +10,13 @@ rag_agent 에서 재검색/모드전환으로 분기(conditional edge)하는 품
 from __future__ import annotations
 
 from app.services.workflow.state import AgentState
+from app.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 async def grade(state: AgentState) -> AgentState:
     documents = state.get("documents") or []
     score = max((d.get("score") or 0.0) for d in documents) if documents else 0.0
+    logger.info("node_grade", grade=round(float(score), 4), n_documents=len(documents))
     return {"grade": float(score)}

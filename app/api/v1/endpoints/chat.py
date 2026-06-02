@@ -20,9 +20,11 @@ from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
 from app.schemas.chat import ChatRequest, ChatResponse
+from app.utils.logger import get_logger
 from app.utils.streaming import run_chat_sync, stream_chat
 
 router = APIRouter()
+logger = get_logger(__name__)
 
 
 @router.post("")
@@ -33,6 +35,14 @@ async def chat(request: ChatRequest):
       스트리밍: [LangGraph astream_events] → stream_chat(generator) → EventSourceResponse
       동기:     [LangGraph ainvoke]        → run_chat_sync(dict)    → JSONResponse
     """
+    logger.info(
+        "chat_request",
+        stream=request.stream,
+        rag_mode=request.rag_mode,
+        top_k=request.top_k,
+        session_id=request.session_id,
+        question_chars=len(request.question),
+    )
     if request.stream:
         # generator 를 SSE 포장지로 감싼다. media_type 은 sse-starlette 가 자동 설정.
         return EventSourceResponse(stream_chat(request))

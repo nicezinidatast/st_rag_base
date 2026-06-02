@@ -11,16 +11,19 @@
 from __future__ import annotations
 
 from app.services.workflow.state import AgentState
+from app.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 async def retrieve(state: AgentState) -> AgentState:
     from app.core.config import settings
     from app.services.ir.base import Retriever
     from app.services.ir.vector import search as vsearch
-    from app.utils.logger import get_logger
 
     query = (state.get("query") or "").strip()
     if not query:
+        logger.info("node_retrieve_skip", reason="blank_query")
         return {"documents": [], "context": "", "citations": []}
 
     top_k = state.get("top_k", 5)
@@ -32,13 +35,15 @@ async def retrieve(state: AgentState) -> AgentState:
     else:
         retriever = vsearch.VectorRetriever()
 
+    logger.info("node_retrieve_start", top_k=top_k, mock=settings.MOCK_RETRIEVER)
     try:
         chunks = await retriever.retrieve(query, top_k=top_k)
     except Exception as e:  # noqa: BLE001  검색 실패는 치명적이지 않다 → 컨텍스트 없이 진행
-        get_logger(__name__).warning("vector retrieve skipped", error=str(e))
+        logger.warning("node_retrieve_skip", reason="error", error=str(e))
         return {"documents": [], "context": "", "citations": []}
 
     if not chunks:
+        logger.info("node_retrieve_done", found=0)
         return {"documents": [], "context": "", "citations": []}
 
     documents = [
@@ -50,4 +55,10 @@ async def retrieve(state: AgentState) -> AgentState:
         {"source_id": c.source_id, "snippet": c.content[:200], "score": c.score}
         for c in chunks
     ]
+    logger.info(
+        "node_retrieve_done",
+        found=len(chunks),
+        top_score=round(chunks[0].score, 4),
+        sources=[c.source_id for c in chunks],
+    )
     return {"documents": documents, "context": context, "citations": citations}

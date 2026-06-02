@@ -30,6 +30,13 @@ class Settings(BaseSettings):
     API_V1_PREFIX: str = "/api/v1"
     CORS_ORIGINS: list[str] = ["*"]
 
+    # ── 로깅 ──────────────────────────────────────────────────
+    # LOG_LEVEL: DEBUG/INFO/WARNING/ERROR. LOG_FILE: 비우면 파일 기록 끔.
+    # LOG_JSON_CONSOLE: true 면 콘솔도 JSON(운영), false 면 사람이 읽기 쉬운 컬러 출력(개발).
+    LOG_LEVEL: str = "INFO"
+    LOG_FILE: str = "logs/app.log"
+    LOG_JSON_CONSOLE: bool = False
+
     # ── 보안 / 인증 ───────────────────────────────────────────
     # SECRET_KEY: JWT 서명 키. prod에서는 반드시 강한 랜덤값으로 교체.
     SECRET_KEY: str = Field(default="change-me", min_length=8)

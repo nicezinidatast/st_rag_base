@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from functools import lru_cache
 from typing import Protocol, runtime_checkable
 
 from app.core.config import settings
@@ -50,8 +51,13 @@ def register(provider: str):
     return deco
 
 
+@lru_cache(maxsize=8)
 def get_embedder(spec: str | None = None) -> Embedder:
-    """"provider:model" 스펙으로 Embedder 생성. None 이면 기본값 사용."""
+    """"provider:model" 스펙으로 Embedder 생성. None 이면 기본값 사용.
+
+    spec 별로 캐시한다 → 로컬 모델(bge-m3 등)이 매 호출마다 재로딩되지 않고
+    프로세스당 1회만 로드된다(질문마다 "Loading weights" 가 뜨던 문제 해결).
+    """
     spec = spec or settings.DEFAULT_EMBEDDING_MODEL
     provider, _, model = spec.partition(":")
     if not model:
@@ -120,10 +126,15 @@ class SentenceTransformerEmbedder:
             from sentence_transformers import SentenceTransformer
 
             from app.core.config import settings
+            from app.utils.logger import get_logger
 
+            get_logger(__name__).info(
+                "embedding_model_loading", model=self.model_name
+            )
             self._model = SentenceTransformer(
                 self.model_name, token=settings.HF_TOKEN
             )
+            get_logger(__name__).info("embedding_model_ready", model=self.model_name)
         return self._model
 
     @property

@@ -10,7 +10,12 @@ state["entities"] 채움. rag_mode 자동 라우팅(AUTO 해소)은 Phase 10(rou
 from __future__ import annotations
 
 from app.services.workflow.state import AgentState
+from app.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 async def analyze(state: AgentState) -> AgentState:
-    return {"query": (state.get("query") or "").strip()}
+    query = (state.get("query") or "").strip()
+    logger.info("node_analyze", rag_mode=state.get("rag_mode"), query_chars=len(query))
+    return {"query": query}
