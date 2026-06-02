@@ -41,3 +41,27 @@ class VectorRetriever(Retriever):
                 )
             )
         return chunks
+
+
+def reciprocal_rank_fusion(
+    rankings: list[list[RetrievedChunk]], k: int = 60
+) -> list[RetrievedChunk]:
+    """[Phase 4 — 스켈레톤] 여러 랭킹(dense / BM25)을 RRF 로 융합.
+
+    각 청크 점수 = Σ 1/(k + rank). source_id 기준으로 합산해 내림차순 정렬한다.
+    본체 구현은 정확도 개선 단계에서 채운다(현재는 슬롯만).
+    """
+    raise NotImplementedError("RRF 융합 미구현 (Phase 4)")
+
+
+class HybridRetriever(Retriever):
+    """[Phase 4 — 스켈레톤] dense + BM25 → RRF 융합 → rerank.
+
+    tokenize_ko 형태소 분리 후 BM25 점수와 VectorRetriever 의 dense 점수를
+    reciprocal_rank_fusion 으로 합치고, ir/vector/rerank.rerank 로 재정렬한다.
+    VectorRetriever 와 동일 시그니처(외부 동작 동일, 검색 정확도만 향상).
+    본체 구현은 정확도 개선 단계에서 채운다(현재는 슬롯만).
+    """
+
+    async def retrieve(self, query: str, top_k: int = 5, **kwargs) -> list[RetrievedChunk]:
+        raise NotImplementedError("하이브리드 검색 미구현 (Phase 4)")
