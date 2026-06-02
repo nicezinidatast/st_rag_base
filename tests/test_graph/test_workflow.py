@@ -5,21 +5,21 @@ analyze→retrieve→grade→generate 흐름과 토큰 스트리밍을 검증한
 """
 from __future__ import annotations
 
+from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+from langchain_core.messages import AIMessage
+
 import app.clients.chat_model as chat_model_module
 import app.services.ir.vector.search as search_module
 from app.services.ir.base import RetrievedChunk
 from app.services.orchestrator.rag_agent import build_graph
+from app.services.workflow.nodes.generate import generate
 from app.services.workflow.nodes.grade import grade
 from app.services.workflow.nodes.retrieve import retrieve
 
 
-class _FakeChatModel:
-    async def achat(self, messages, **kwargs):
-        return "fake-answer"
-
-    async def astream(self, messages, **kwargs):
-        for tok in ["fake", "-", "answer"]:
-            yield tok
+def _fake_chat_model(content="fake answer"):
+    """LangChain BaseChatModel 대역. 공백 기준으로 토큰이 쪼개진다."""
+    return GenericFakeChatModel(messages=iter([AIMessage(content=content)]))
 
 
 class _FakeRetriever:
@@ -67,38 +67,43 @@ async def test_grade_node_zero_without_documents():
     assert (await grade({}))["grade"] == 0.0
 
 
+async def test_generate_node_produces_answer(monkeypatch):
+    monkeypatch.setattr(chat_model_module, "get_chat_model", lambda spec=None: _fake_chat_model())
+    out = await generate({"query": "안녕?", "context": "", "model": "anthropic:x"})
+    assert out["answer"] == "fake answer"
+    assert out["model"] == "anthropic:x"
+
+
 # ── 그래프 e2e ───────────────────────────────────────────────────────
-# generate 노드는 get_stream_writer 가 runnable 컨텍스트를 요구하므로 직접 호출 대신
-# 그래프(ainvoke=답변 누적 / astream custom=토큰 스트리밍)로 검증한다.
 
 
 async def test_graph_end_to_end_sync(monkeypatch):
     build_graph.cache_clear()
     monkeypatch.setattr(search_module, "VectorRetriever", lambda: _FakeRetriever([_chunk()]))
-    monkeypatch.setattr(chat_model_module, "get_chat_model", lambda spec=None: _FakeChatModel())
+    monkeypatch.setattr(chat_model_module, "get_chat_model", lambda spec=None: _fake_chat_model())
 
     final = await build_graph().ainvoke(
         {"query": "수도?", "rag_mode": "auto", "top_k": 5, "model": "anthropic:x"}
     )
-    assert final["answer"] == "fake-answer"
+    assert final["answer"] == "fake answer"
     assert final["citations"][0]["source_id"] == "doc-1"
     assert final["grade"] == 0.9
 
 
-async def test_graph_streams_custom_tokens(monkeypatch):
+async def test_graph_streams_tokens_via_astream_events(monkeypatch):
     build_graph.cache_clear()
     monkeypatch.setattr(search_module, "VectorRetriever", lambda: _FakeRetriever([_chunk()]))
-    monkeypatch.setattr(chat_model_module, "get_chat_model", lambda spec=None: _FakeChatModel())
+    monkeypatch.setattr(chat_model_module, "get_chat_model", lambda spec=None: _fake_chat_model())
 
     tokens = []
     citations = None
-    async for mode, chunk in build_graph().astream(
+    async for ev in build_graph().astream_events(
         {"query": "수도?", "rag_mode": "auto", "top_k": 5, "model": "anthropic:x"},
-        stream_mode=["updates", "custom"],
+        version="v2",
     ):
-        if mode == "custom":
-            tokens.append(chunk["token"])
-        elif mode == "updates" and "retrieve" in chunk:
-            citations = chunk["retrieve"]["citations"]
-    assert "".join(tokens) == "fake-answer"
+        if ev["event"] == "on_chat_model_stream":
+            tokens.append(ev["data"]["chunk"].content)
+        elif ev["event"] == "on_chain_end" and ev.get("name") == "retrieve":
+            citations = ev["data"]["output"]["citations"]
+    assert "".join(tokens) == "fake answer"
     assert citations[0]["source_id"] == "doc-1"

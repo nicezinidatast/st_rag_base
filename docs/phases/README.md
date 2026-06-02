@@ -16,12 +16,11 @@
 
 ```
 요청(question) ─▶ endpoints/chat.py ─┬─ stream=false ─▶ run_chat_sync ─▶ graph.ainvoke
-                                     └─ stream=true  ─▶ stream_chat  ─▶ graph.astream
-                                                                          (updates+custom)
+                                     └─ stream=true  ─▶ stream_chat  ─▶ graph.astream_events(v2)
                                                                        ▼
    build_graph():  analyze ─▶ retrieve ─▶ grade ─▶ generate          (Phase 5, LangGraph)
                               │                       │
-              VectorRetriever/MockRetriever      ChatModel.astream + get_stream_writer
-              (embedding→vector_db query)        (토큰 → custom 스트림 → SSE)
+              VectorRetriever/MockRetriever      LangChain BaseChatModel.ainvoke
+              (embedding→vector_db query)        (토큰 → on_chat_model_stream → SSE)
    적재: /documents/ingest → ir/vector/ingest → embedding+upsert
 ```

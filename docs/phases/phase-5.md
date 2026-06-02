@@ -33,12 +33,14 @@ analyze ─▶ retrieve ─▶ grade ─▶ generate     (선형, START→…→
 LLM 관련성 채점 + 저점수 시 재검색 분기(conditional edge)는 추후 품질 게이트로.
 
 ### `generate.py` — 답변 생성 (Phase 3 `_build_messages` + LLM 이식)
-`get_chat_model(spec).astream()` 으로 토큰을 받아 **`get_stream_writer()` 로 흘리고** 동시에 누적해
-`answer` 로 반환. system 프롬프트(컨텍스트 근거 강제)는 Phase 3 그대로 보존.
+`await get_chat_model(spec).ainvoke(messages)` → `resp.content` 를 `answer` 로 반환.
+system 프롬프트(컨텍스트 근거 강제)는 Phase 3 그대로 보존.
 
-> **스트리밍 핵심:** 우리 `ChatModel` 은 LangChain Runnable 이 아니라서 `astream_events` 로는
-> 토큰이 안 잡힌다. 대신 `get_stream_writer()`(custom 스트림) 로 흘린다. `ainvoke`(동기)일 땐
-> writer 가 **자동 no-op** 이라 같은 generate 코드가 동기/스트리밍 양쪽을 커버한다.
+> **스트리밍 핵심:** 토큰 스트리밍은 generate 가 신경 쓰지 않는다. streaming.py 가
+> `astream_events(v2)` 로 그래프를 돌리면 **LangChain 챗 모델 호출이 `on_chat_model_stream`
+> 이벤트로 토큰을 자동으로 흘린다**(노드가 `ainvoke` 든 `astream` 이든 무관).
+> ※ 초기 구현은 커스텀 `ChatModel`+`get_stream_writer`(custom 스트림)였으나, 같은 세션에서
+> 모델 레이어를 LangChain `BaseChatModel` 로 전환하며 위 방식으로 단순화했다(아래 F 참고).
 
 ---
 
@@ -64,9 +66,9 @@ def build_graph():
 `_retrieve_context`/`_build_messages` 제거(노드로 이동). 키 없음 개발 가드는 그대로 유지.
 
 - **`run_chat_sync`**: `await build_graph().ainvoke(state)` → 최종 state 에서 `answer/citations/model`.
-- **`stream_chat`**: `graph.astream(state, stream_mode=["updates","custom"])`
-  - `updates` → retrieve 노드 출력의 `citations` 를 **EVENT_META 로 먼저** 송출(노드가 순서대로 돎).
-  - `custom` → generate 가 흘린 토큰을 **EVENT_TOKEN** 으로 중계. 끝에 `[DONE]`.
+- **`stream_chat`**: `graph.astream_events(state, version="v2")` *(F 전환 후)*
+  - `on_chain_end`(name=`retrieve`) → 그 출력의 `citations` 를 **EVENT_META 로 먼저** 송출.
+  - `on_chat_model_stream` → generate 의 LLM 토큰을 **EVENT_TOKEN** 으로 중계. 끝에 `[DONE]`.
 
 `AgentState` 에 `top_k` / `model` / `context` 필드 추가.
 
@@ -83,6 +85,25 @@ def build_graph():
 
 placeholder 제거 후 신설:
 - **노드 단위**: retrieve(컨텍스트/citations 채움 · 빈 결과 · 공백 쿼리 스킵), grade(최고점/0.0).
-- **그래프 e2e**: `ainvoke` 동기(answer/citations/grade), `astream` custom(토큰 누적 + meta citations).
-- generate 는 `get_stream_writer` 가 runnable 컨텍스트를 요구해 직접 호출 대신 그래프로 검증.
-- 기존 `test_api/test_chat.py`(동기/스트리밍/가드)는 **수정 없이 그대로 통과** — 외부 동작 불변 증명.
+- **그래프 e2e**: `ainvoke` 동기(answer/citations/grade), `astream_events`(토큰 누적 + meta citations).
+- 노드 단위: retrieve/grade/generate 직접 호출 검증.
+- 기존 `test_api/test_chat.py`(동기/스트리밍/가드)는 외부 동작 불변. (F 전환으로 fake 만 LangChain
+  모델로 교체, 단언은 동일 — `GenericFakeChatModel`.)
+
+---
+
+## F. (후속) 채팅 모델 → LangChain `BaseChatModel` 전환
+
+같은 세션에서 자체 `ChatModel` Protocol/래퍼를 **LangChain 통합 모델**로 갈아끼웠다. 이유: LangGraph
+`astream_events(v2)` 가 토큰을 자동 포착(스트리밍 배관 제거) + 콜백 트레이싱(Phase 11) + 생태계 기능.
+
+- 의존성: `langchain-anthropic`, `langchain-openai` 추가(`pyproject`/`uv.lock`).
+- `clients/chat_model.py`: 빌더 레지스트리 유지하되 반환을 `BaseChatModel` 로
+  (`ChatAnthropic`/`ChatOpenAI`). 키는 settings 에서 골라 명시 주입(.env 는 환경변수가 아니므로).
+- `clients/openai_client.py`, `anthropic_client.py` **삭제**(통합 모델이 대체).
+- `generate.py`: `get_stream_writer`+`astream` 루프 → `ainvoke` 한 줄.
+- `streaming.py`: `astream(stream_mode=custom)` → `astream_events(v2)`.
+- `orchestrator/base.py`(`BaseOrchestrator` ABC) **삭제** — 아무도 안 씀(오케스트레이션은 graph 가 함).
+- 테스트: `test_anthropic_client.py` 삭제, `test_chat_model.py` 재작성(생성만 검증),
+  fake 는 `GenericFakeChatModel` 로 통일.
+- **트레이드오프:** SDK 직접 종속 → `langchain-*` 버전 종속으로 이동.

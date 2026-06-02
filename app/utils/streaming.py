@@ -87,11 +87,12 @@ def _initial_state(request: Any, spec: str) -> dict:
 
 
 async def stream_chat(request: Any) -> AsyncIterator[dict]:
-    """[스트리밍 응답용 generator — Phase 5]
+    """[스트리밍 응답용 generator — Phase 5+]
 
-    LangGraph 를 astream(stream_mode=["updates","custom"]) 으로 돌린다:
-      · "updates" → retrieve 노드가 끝나면 그 출력의 citations 를 EVENT_META 로 먼저 송출.
-      · "custom"  → generate 노드가 get_stream_writer 로 흘린 토큰을 EVENT_TOKEN 으로 중계.
+    LangGraph 를 astream_events(version="v2") 로 돌린다. LangChain 챗 모델 호출이
+    이벤트로 흘러나오므로 별도 토큰 배관이 필요 없다:
+      · on_chain_end(name="retrieve") → 그 출력의 citations 를 EVENT_META 로 먼저 송출.
+      · on_chat_model_stream         → generate 의 LLM 토큰을 EVENT_TOKEN 으로 중계.
     노드가 analyze→retrieve→grade→generate 순으로 도므로 meta(출처)가 토큰보다 먼저 나간다.
 
     주의: 이 함수는 HTTP 를 몰라야 한다(헤더/상태코드 X). 오직 이벤트만 yield.
@@ -111,19 +112,16 @@ async def stream_chat(request: Any) -> AsyncIterator[dict]:
     graph = build_graph()
     try:
         meta_sent = False
-        async for mode, chunk in graph.astream(
-            _initial_state(request, spec), stream_mode=["updates", "custom"]
-        ):
-            if mode == "updates":
-                node_out = chunk.get("retrieve")
-                if node_out is not None and not meta_sent:
-                    meta = {"model": spec, "citations": node_out.get("citations", [])}
-                    yield sse(meta, EVENT_META)
-                    meta_sent = True
-            elif mode == "custom":
-                token = chunk.get("token")
-                if token:
+        async for ev in graph.astream_events(_initial_state(request, spec), version="v2"):
+            kind = ev["event"]
+            if kind == "on_chat_model_stream":
+                token = ev["data"]["chunk"].content
+                if isinstance(token, str) and token:
                     yield sse(token, EVENT_TOKEN)
+            elif kind == "on_chain_end" and ev.get("name") == "retrieve" and not meta_sent:
+                citations = (ev["data"].get("output") or {}).get("citations", [])
+                yield sse({"model": spec, "citations": citations}, EVENT_META)
+                meta_sent = True
         yield sse("[DONE]", EVENT_DONE)
     except Exception as e:  # noqa: BLE001  스트림 중 에러는 이벤트로만 알릴 수 있다
         yield sse(str(e), EVENT_ERROR)

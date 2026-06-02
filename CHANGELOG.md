@@ -119,6 +119,24 @@
 - **스트리밍 메모:** 커스텀 `ChatModel` 은 LangChain Runnable 이 아니라 `astream_events` 로 토큰이
   안 잡힌다 → `get_stream_writer()`(custom 스트림) 사용. `ainvoke` 일 땐 writer 가 no-op 이라
   generate 한 벌로 동기/스트리밍 양쪽 커버.
-- **테스트:** `tests/test_graph/test_workflow.py` 신설(노드 단위 + 그래프 e2e). 기존
-  `test_api/test_chat.py` **수정 없이 통과**(외부 동작 불변 증명). `pytest` 36 passed.
+- **테스트:** `tests/test_graph/test_workflow.py` 신설(노드 단위 + 그래프 e2e).
+- **커밋:** `c456461` feat(workflow) / `a57e101` docs(phases)
+
+## [x] Phase 5+ — 채팅 모델 LangChain `BaseChatModel` 전환 + 정리
+
+- **목표:** 자체 `ChatModel` Protocol/래퍼 → LangChain 통합 모델. LangGraph `astream_events(v2)`
+  로 토큰 자동 포착(스트리밍 배관 제거) + 콜백 트레이싱(Phase 11) 기반 마련.
+- **주요 변경:**
+  - 의존성 추가: `langchain-anthropic`, `langchain-openai` (`pyproject.toml`/`uv.lock`).
+  - `clients/chat_model.py` — 빌더 레지스트리 유지, 반환을 `BaseChatModel`(`ChatAnthropic`/`ChatOpenAI`)로.
+    키는 settings 에서 명시 주입.
+  - **삭제:** `clients/openai_client.py`, `clients/anthropic_client.py`(통합 모델이 대체),
+    `services/orchestrator/base.py`(`BaseOrchestrator` 미사용 — 오케스트레이션은 graph 담당).
+  - `workflow/nodes/generate.py` — `get_stream_writer`+`astream` → `ainvoke` 한 줄.
+  - `utils/streaming.py` — `astream(stream_mode=custom)` → `astream_events(v2)`
+    (`on_chat_model_stream`→token, `on_chain_end`(retrieve)→meta citations).
+  - 테스트: `test_anthropic_client.py` 삭제, `test_chat_model.py` 재작성(생성 검증),
+    fake 는 `GenericFakeChatModel` 통일.
+- **트레이드오프:** SDK 직접 종속 → `langchain-*` 버전 종속으로 이동.
+- **테스트:** `pytest` 34 passed. ruff/mypy 통과. 서버 부팅 + 실제 모델 빌드 확인.
 - **커밋:** _(미커밋)_
