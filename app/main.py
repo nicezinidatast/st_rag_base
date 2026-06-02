@@ -33,6 +33,17 @@ async def lifespan(app: FastAPI):
     init_langfuse()  # Langfuse 트레이싱 초기화 (키 없거나 비활성화면 no-op)
     logger.info("startup", env=settings.ENV, app=settings.APP_NAME)
 
+    # 임베딩 모델 워밍업: 첫 질문에서 14초 로드 대기가 걸리지 않도록 부팅 때 미리 로드.
+    # MOCK_RETRIEVER 면 임베딩을 안 쓰므로 스킵(개발 중 reload 빠르게).
+    if settings.EMBEDDING_WARMUP and not settings.MOCK_RETRIEVER:
+        from app.clients.embedding import get_embedder
+
+        try:
+            await get_embedder().aembed_query("warmup")
+            logger.info("embedding_warmup_done")
+        except Exception as e:  # noqa: BLE001  워밍업 실패가 부팅을 막아선 안 됨
+            logger.warning("embedding_warmup_failed", error=str(e))
+
     # TODO(구현): DB/Redis/Vector/Graph 풀을 열어 app.state 에 저장
     #   app.state.db = ...
     #   app.state.redis = ...
