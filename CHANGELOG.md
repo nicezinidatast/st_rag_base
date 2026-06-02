@@ -87,9 +87,38 @@
   - `app/services/ir/mock.py` — `Retriever` 구현. 쿼리와 무관하게 포켓몬 가상 문서 5건
     (피카츄·리자몽·꼬부기·뮤츠·이상해씨)을 `RetrievedChunk` 로 고정 반환.
   - `app/core/config.py` — `MOCK_RETRIEVER: bool = False` 토글.
-  - `app/utils/streaming.py` — `_retrieve_context` 가 `MOCK_RETRIEVER` true 면 `MockRetriever`,
-    아니면 `VectorRetriever` 선택(동기/스트리밍 양쪽 공유).
+  - `app/utils/streaming.py` → (Phase 5 에서 `retrieve` 노드로 이동) `MOCK_RETRIEVER` true 면
+    `MockRetriever`, 아니면 `VectorRetriever` 선택.
   - `.env` — `MOCK_RETRIEVER=false` 기본.
 - **테스트(갱신):** `pytest` 30 passed (커버리지 옵션 제외 시).
-- **커밋:** `ce14e28` feat(clients): pass HF_TOKEN to SentenceTransformer download
-  / _(MockRetriever 커밋 후속)_
+- **커밋:** `ce14e28` feat(clients): pass HF_TOKEN / `7cfc9b2` feat(ir): MockRetriever
+  / `9cf9784` feat(ir/vector): Phase 4 hybrid 스텁
+
+## [x] Phase 4 — 하이브리드 검색(BM25) + 리랭커 *(스켈레톤만)*
+
+- **결정:** 하이브리드/rerank 는 정확도 최적화 단계라 MVP 에는 본체 구현을 미룬다.
+  **함수 슬롯(스텁)만** 만들어 Phase 5 가 인터페이스를 참조할 수 있게 자리만 잡았다.
+- **주요 변경:** `app/services/ir/vector/search.py` — `reciprocal_rank_fusion`(RRF 융합),
+  `HybridRetriever`(dense+BM25→RRF→rerank) `NotImplementedError` 스텁 추가.
+  (기존 스텁: `rerank.py`, `clients/reranker.py` 팩토리, `utils/text.tokenize_ko` placeholder.)
+- **커밋:** `9cf9784` feat(ir/vector): scaffold Phase 4 hybrid search stubs
+
+## [x] Phase 5 — LangGraph 워크플로로 구조화
+
+- **목표:** 함수로 엮던 흐름을 상태머신으로 정식화. **외부 동작은 Phase 3/4 와 동일**, 내부만 그래프.
+  `analyze → retrieve → grade → generate` (선형).
+- **주요 변경:**
+  - `app/services/workflow/nodes/*` — 4개 노드 구현(`NotImplementedError` 졸업).
+    analyze(경량 정규화) / retrieve(Phase 3 검색 로직 이식) / grade(검색 최고점, LLM 無) /
+    generate(`astream`+`get_stream_writer` 토큰 송출 & 누적).
+  - `app/services/orchestrator/rag_agent.py` — `build_graph()`(`StateGraph` 구성+compile, lru_cache).
+  - `app/utils/streaming.py` — 로직 제거 후 **얇은 어댑터**로. sync=`ainvoke`,
+    stream=`astream(stream_mode=["updates","custom"])` (retrieve→meta, generate→token).
+  - `app/services/workflow/state.py` — `top_k`/`model`/`context` 필드 추가.
+  - `workflow/nodes/__init__.py` — 노드 re-export.
+- **스트리밍 메모:** 커스텀 `ChatModel` 은 LangChain Runnable 이 아니라 `astream_events` 로 토큰이
+  안 잡힌다 → `get_stream_writer()`(custom 스트림) 사용. `ainvoke` 일 땐 writer 가 no-op 이라
+  generate 한 벌로 동기/스트리밍 양쪽 커버.
+- **테스트:** `tests/test_graph/test_workflow.py` 신설(노드 단위 + 그래프 e2e). 기존
+  `test_api/test_chat.py` **수정 없이 통과**(외부 동작 불변 증명). `pytest` 36 passed.
+- **커밋:** _(미커밋)_
