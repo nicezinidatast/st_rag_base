@@ -28,6 +28,7 @@ class VectorRetriever(Retriever):
             query=query_vector,
             limit=top_k,
             with_payload=True,
+            score_threshold=0.5,  # 유사도 0.5 이상만 반환 (실험적, 필요시 조정)
         )
         chunks = []
         for p in resp.points:
