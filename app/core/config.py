@@ -62,6 +62,9 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str | None = None
     VOYAGE_API_KEY: str | None = None          # Voyage 임베딩
     HUGGINGFACE_API_KEY: str | None = None
+    # HF Hub 토큰. sentence-transformers 모델 다운로드 시 인증에 사용
+    # (없으면 익명 요청 → rate limit 낮음 + 다운로드 느림 경고).
+    HF_TOKEN: str | None = None
     UPSTAGE_API_KEY: str | None = None         # Solar (한국어 특화)
 
     # Azure OpenAI (엔드포인트/배포명 별도 필요)

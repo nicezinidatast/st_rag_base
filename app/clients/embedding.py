@@ -119,7 +119,11 @@ class SentenceTransformerEmbedder:
         if self._model is None:
             from sentence_transformers import SentenceTransformer
 
-            self._model = SentenceTransformer(self.model_name)
+            from app.core.config import settings
+
+            self._model = SentenceTransformer(
+                self.model_name, token=settings.HF_TOKEN
+            )
         return self._model
 
     @property
