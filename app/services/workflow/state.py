@@ -11,8 +11,11 @@ from typing import TypedDict
 class AgentState(TypedDict, total=False):
     query: str
     rag_mode: str
+    top_k: int                 # 검색할 청크 수 (요청에서 전달)
+    model: str                 # 답변 생성에 쓸 "provider:model"
     entities: list[str]
     documents: list[dict]      # 검색/리랭크된 청크
+    context: str               # documents 를 LLM 입력용으로 합친 문자열
     grade: float               # 컨텍스트 신뢰도 점수
     answer: str
     citations: list[dict]

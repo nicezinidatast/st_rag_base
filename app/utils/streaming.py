@@ -76,81 +76,27 @@ def sse(data: Any, event: str = EVENT_TOKEN) -> dict:
     return {"event": event, "data": payload}
 
 
-async def _retrieve_context(question: str, top_k: int) -> tuple[str, list[dict]]:
-    """[Phase 3] 질문으로 vector 검색 → (컨텍스트 문자열, citations).
-
-    적재 전(컬렉션 없음)이거나 결과가 없으면 ("", []) 을 돌려준다 → 컨텍스트 없이 답변.
-    검색 인프라(Qdrant/임베딩)가 없거나 실패해도 채팅 자체는 막지 않는다(검색만 건너뜀).
-    """
-    from app.core.config import settings
-    from app.services.ir.base import Retriever
-    from app.services.ir.vector import search as vsearch
-    from app.utils.logger import get_logger
-
-    if not question.strip():
-        return "", []
-
-    if settings.MOCK_RETRIEVER:
-        from app.services.ir.mock import MockRetriever
-
-        retriever: Retriever = MockRetriever()
-    else:
-        retriever = vsearch.VectorRetriever()
-
-    try:
-        chunks = await retriever.retrieve(question, top_k=top_k)
-    except Exception as e:  # noqa: BLE001  검색 실패는 치명적이지 않다 → 컨텍스트 없이 진행
-        get_logger(__name__).warning("vector retrieve skipped", error=str(e))
-        return "", []
-    if not chunks:
-        return "", []
-
-    context = "\n\n".join(f"[{i + 1}] {c.content}" for i, c in enumerate(chunks))
-    citations = [
-        {"source_id": c.source_id, "snippet": c.content[:200], "score": c.score}
-        for c in chunks
-    ]
-    return context, citations
-
-
-def _build_messages(question: str, context: str) -> list[dict]:
-    """질문(+검색 컨텍스트)을 LLM 메시지 목록으로 만든다.
-
-    클라이언트는 question 만 보내고, user 메시지 변환은 여기서 한다.
-    컨텍스트가 있으면 system 메시지로 앞에 끼운다.
-    """
-    messages: list[dict] = []
-    if context:
-        messages.append(
-            {
-                "role": "system",
-                "content": (
-                    "다음 컨텍스트를 근거로 답하라. 컨텍스트에 없으면 모른다고 답하라.\n\n"
-                    f"{context}"
-                ),
-            }
-        )
-    messages.append({"role": "user", "content": question})
-    return messages
+def _initial_state(request: Any, spec: str) -> dict:
+    """ChatRequest → LangGraph 입력 state. (rag_mode 는 StrEnum 이라 그대로 str 로 쓰임)"""
+    return {
+        "query": request.question,
+        "rag_mode": request.rag_mode,
+        "top_k": request.top_k,
+        "model": spec,
+    }
 
 
 async def stream_chat(request: Any) -> AsyncIterator[dict]:
-    """[스트리밍 응답용 generator — Phase 2~3 임시 구현]
+    """[스트리밍 응답용 generator — Phase 5]
 
-    원래는 LangGraph 의 astream_events 로 토큰을 흘려야 하지만(아래 미래 가이드),
-    아직 graph 가 없다(Phase 5). 그래서 run_chat_sync 와 대칭으로, vector 검색으로
-    컨텍스트를 만든 뒤(Phase 3) ChatModel.astream 을 직접 호출해 토큰을 흘린다.
-
-        graph = build_graph()                                    # ← Phase 5 에서 이렇게 교체
-        async for ev in graph.astream_events(state, version="v2"):
-            if ev["event"] == "on_chat_model_stream":
-                yield sse(ev["data"]["chunk"].content, EVENT_TOKEN)
-        # 출처/인용은 EVENT_META 로 따로 흘려보낸다.
+    LangGraph 를 astream(stream_mode=["updates","custom"]) 으로 돌린다:
+      · "updates" → retrieve 노드가 끝나면 그 출력의 citations 를 EVENT_META 로 먼저 송출.
+      · "custom"  → generate 노드가 get_stream_writer 로 흘린 토큰을 EVENT_TOKEN 으로 중계.
+    노드가 analyze→retrieve→grade→generate 순으로 도므로 meta(출처)가 토큰보다 먼저 나간다.
 
     주의: 이 함수는 HTTP 를 몰라야 한다(헤더/상태코드 X). 오직 이벤트만 yield.
     스트림 도중 죽으면 HTTP 상태코드로 못 알리므로 에러도 이벤트로 알린다(EVENT_ERROR).
     """
-    from app.clients.chat_model import get_chat_model
     from app.core.config import settings
 
     # [개발 편의 가드] 챗 LLM 키가 없으면 안내 값을 토큰으로 흘리고 끝낸다. (run_chat_sync 와 동일)
@@ -159,33 +105,36 @@ async def stream_chat(request: Any) -> AsyncIterator[dict]:
         yield sse("[DONE]", EVENT_DONE)
         return
 
+    from app.services.orchestrator.rag_agent import build_graph
+
     spec = request.model or settings.DEFAULT_CHAT_MODEL
-    chat_model = get_chat_model(spec)
+    graph = build_graph()
     try:
-        context, citations = await _retrieve_context(request.question, request.top_k)
-        # 사용 모델 + 출처를 먼저 meta 로 알려준다(프론트가 헤더처럼 받음).
-        yield sse({"model": spec, "citations": citations}, EVENT_META)
-        messages = _build_messages(request.question, context)
-        async for token in chat_model.astream(messages):
-            yield sse(token, EVENT_TOKEN)
+        meta_sent = False
+        async for mode, chunk in graph.astream(
+            _initial_state(request, spec), stream_mode=["updates", "custom"]
+        ):
+            if mode == "updates":
+                node_out = chunk.get("retrieve")
+                if node_out is not None and not meta_sent:
+                    meta = {"model": spec, "citations": node_out.get("citations", [])}
+                    yield sse(meta, EVENT_META)
+                    meta_sent = True
+            elif mode == "custom":
+                token = chunk.get("token")
+                if token:
+                    yield sse(token, EVENT_TOKEN)
         yield sse("[DONE]", EVENT_DONE)
     except Exception as e:  # noqa: BLE001  스트림 중 에러는 이벤트로만 알릴 수 있다
         yield sse(str(e), EVENT_ERROR)
 
 
 async def run_chat_sync(request: Any) -> dict:
-    """[동기 응답용 — Phase 1~3 임시 구현]
+    """[동기 응답용 — Phase 5]
 
-    원래는 LangGraph 를 돌려야 하지만(아래 주석), 아직 graph 가 없다(Phase 5).
-    그래서 vector 검색으로 컨텍스트를 만든 뒤(Phase 3) ChatModel 을 직접 호출해
-    답변을 만든다.
-
-        result = await graph.ainvoke(state)                          # ← Phase 5 에서 이렇게 교체
-        return {"answer": result["answer"], "citations": result.get("citations", [])}
-
+    LangGraph 를 graph.ainvoke(state) 로 끝까지 돌려 최종 state 에서 답변/출처를 꺼낸다.
     endpoints/chat.py 에서 이 반환값을 ChatResponse 로 직렬화한다.
     """
-    from app.clients.chat_model import get_chat_model
     from app.core.config import settings
 
     spec = request.model or settings.DEFAULT_CHAT_MODEL
@@ -195,8 +144,11 @@ async def run_chat_sync(request: Any) -> dict:
     if not settings.ANTHROPIC_API_KEY:
         return {"answer": NO_API_KEY_MESSAGE, "citations": [], "model": spec}
 
-    chat_model = get_chat_model(spec)
-    context, citations = await _retrieve_context(request.question, request.top_k)
-    messages = _build_messages(request.question, context)
-    answer = await chat_model.achat(messages)
-    return {"answer": answer, "citations": citations, "model": spec}
+    from app.services.orchestrator.rag_agent import build_graph
+
+    final = await build_graph().ainvoke(_initial_state(request, spec))
+    return {
+        "answer": final.get("answer", ""),
+        "citations": final.get("citations", []),
+        "model": final.get("model", spec),
+    }
