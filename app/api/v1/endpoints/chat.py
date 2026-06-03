@@ -35,6 +35,8 @@ async def chat(request: ChatRequest):
       스트리밍: [LangGraph astream_events] → stream_chat(generator) → EventSourceResponse
       동기:     [LangGraph ainvoke]        → run_chat_sync(dict)    → JSONResponse
     """
+    # session_id 를 여기서 1회 확정한다(없으면 발급). 이후 메모리/캐시·응답이 같은 id 를 쓴다.
+    request.session_id = request.session_id or uuid4().hex
     logger.info(
         "chat_request",
         stream=request.stream,
@@ -50,7 +52,7 @@ async def chat(request: ChatRequest):
     # 동기 경로: 전체 답변을 만들어 한 번에 반환.
     result = await run_chat_sync(request)
     response = ChatResponse(
-        session_id=request.session_id or str(uuid4()),
+        session_id=result["session_id"],
         answer=result["answer"],
         citations=result.get("citations", []),
         rag_mode=request.rag_mode,

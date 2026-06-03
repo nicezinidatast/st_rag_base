@@ -187,3 +187,54 @@ def test_chat_stream_without_key_streams_guard_message(monkeypatch):
     assert resp.status_code == 200
     assert NO_API_KEY_MESSAGE in resp.text
     assert "event: done" in resp.text
+
+
+# ── Phase 6: 메모리 + 캐시 ───────────────────────────────────────────
+
+
+def test_chat_cache_hit_skips_second_llm_call(monkeypatch):
+    """같은 질문 2회 → 2번째는 캐시 히트라 LLM(get_chat_model)을 호출하지 않는다."""
+    monkeypatch.setattr(settings, "ANTHROPIC_API_KEY", "test-key")
+    calls = {"n": 0}
+
+    def _get(spec=None):
+        calls["n"] += 1
+        return _fake_chat_model()
+
+    monkeypatch.setattr(chat_model_module, "get_chat_model", _get)
+    _patch_no_retrieval(monkeypatch)
+
+    client = TestClient(app)
+    body = {"question": "캐시 대상 질문?", "session_id": "c1", "stream": False}
+    r1 = client.post("/api/v1/chat", json=body)
+    r2 = client.post("/api/v1/chat", json=body)
+
+    assert r1.json()["answer"] == "fake answer"
+    assert r2.json()["answer"] == "fake answer"  # 캐시에서 그대로
+    assert calls["n"] == 1  # 2번째는 LLM 미호출
+
+
+def test_chat_injects_prior_history(monkeypatch):
+    """같은 session 의 후속 질문에는 이전 대화(이력)가 메시지로 주입된다."""
+    monkeypatch.setattr(settings, "ANTHROPIC_API_KEY", "test-key")
+    _patch_no_retrieval(monkeypatch)
+    client = TestClient(app)
+
+    # 1턴: 이력 적재
+    monkeypatch.setattr(chat_model_module, "get_chat_model", lambda spec=None: _fake_chat_model())
+    client.post("/api/v1/chat", json={"question": "첫질문", "session_id": "h1", "stream": False})
+
+    # 2턴: 모델에 전달된 messages 를 캡처
+    seen = {}
+
+    class _CapModel:
+        async def ainvoke(self, messages):
+            seen["messages"] = messages
+            return AIMessage(content="응답")
+
+    monkeypatch.setattr(chat_model_module, "get_chat_model", lambda spec=None: _CapModel())
+    client.post("/api/v1/chat", json={"question": "둘째질문", "session_id": "h1", "stream": False})
+
+    contents = [m["content"] for m in seen["messages"]]
+    assert "첫질문" in contents  # 이전 user 메시지 주입됨
+    assert seen["messages"][-1]["content"] == "둘째질문"  # 현재 질문이 마지막

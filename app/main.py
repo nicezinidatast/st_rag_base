@@ -44,9 +44,21 @@ async def lifespan(app: FastAPI):
         except Exception as e:  # noqa: BLE001  워밍업 실패가 부팅을 막아선 안 됨
             logger.warning("embedding_warmup_failed", error=str(e))
 
-    # TODO(구현): DB/Redis/Vector/Graph 풀을 열어 app.state 에 저장
+    # Redis 연결 확인(대화 이력/캐시용). 미기동이어도 부팅은 막지 않고, 가용성 플래그를 내려
+    # 이후 memory/cache 가 매 요청 연결 재시도 없이 즉시 건너뛰게 한다(요청 지연 0).
+    if settings.MEMORY_ENABLED or settings.CACHE_ENABLED:
+        from app.core import redis as _redis
+
+        try:
+            await _redis.redis_client.ping()
+            _redis.set_available(True)
+            logger.info("redis_connected")
+        except Exception as e:  # noqa: BLE001  Redis 미기동이어도 채팅은 동작(이력/캐시만 스킵)
+            _redis.set_available(False)
+            logger.warning("redis_unavailable", error=str(e))
+
+    # TODO(구현): DB/Vector/Graph 풀을 열어 app.state 에 저장
     #   app.state.db = ...
-    #   app.state.redis = ...
     #   app.state.vector = ...
     #   app.state.graph = ...
 
@@ -54,7 +66,12 @@ async def lifespan(app: FastAPI):
 
     logger.info("shutdown")
     shutdown_langfuse()  # 버퍼에 남은 트레이스 flush
-    # TODO(구현): 위에서 연 풀들을 gracefully close
+    try:
+        from app.core.redis import redis_client
+
+        await redis_client.aclose()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("redis_close_skipped", error=str(e))
 
 
 def create_app() -> FastAPI:
