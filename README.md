@@ -169,11 +169,12 @@ docker compose up -d neo4j              # Phase 9: GraphRAG
 - ✅ 외부 동작은 Phase 4 와 같되, 내부가 노드 그래프로 정리됨. grade 노드로 품질 게이트 추가 가능.
 - 🔍 기존 테스트 그대로 통과 + 노드/그래프 테스트(`tests/test_graph/test_workflow.py`) 추가.
 
-### Phase 6 — 대화 메모리 + 시맨틱 캐시 (Redis)
-- 🎯 멀티턴 맥락 유지 + 동일/유사 질문 캐싱으로 비용 절감.
-- 🛠 `core/redis.py` 연결 → `services/memory.py`(이력) → `services/cache.py`(시맨틱 캐시)
-  → generate 노드에 이전 맥락 주입, 진입부에 캐시 조회
-- ✅ 이어지는 질문이 맥락을 기억. 반복 질문은 캐시 히트.
+### [x] Phase 6 — 대화 메모리 + 응답 캐시 (Redis)
+- 🎯 멀티턴 맥락 유지 + 반복 질문 캐싱으로 비용 절감.
+- 🛠 `core/redis.py`(빠른 타임아웃+가용성 플래그) → `services/memory.py`(이력) →
+  `services/cache.py`(완전일치 캐시) → generate 에 이전 맥락 주입, 진입부에 캐시 조회
+- ✅ 이어지는 질문이 맥락을 기억. 반복 질문은 캐시 히트. **Redis 없어도 채팅 정상·빠름**(이력/캐시만 스킵).
+- 📌 캐시는 완전일치 MVP. 진짜 시맨틱(임베딩 유사도)은 RediSearch 필요 → 후속.
 - 🔍 멀티턴 대화 + 같은 질문 2회 호출 시 두 번째가 빠른지 확인.
 
 ### Phase 7 — 인증/RBAC + 영속화 (Postgres + Alembic)

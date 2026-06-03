@@ -11,6 +11,7 @@
 | 3 | Vector RAG(검색→출처) + Anthropic 챗 + 로컬 bge-m3 | _(미커밋)_ | [phase-3.md](phase-3.md) |
 | 4 | 하이브리드 검색(BM25)+리랭커 — **스켈레톤만** | `9cf9784` | _(스텁, 본체 미구현)_ |
 | 5 | LangGraph 워크플로 구조화(analyze→retrieve→grade→generate) | _(미커밋)_ | [phase-5.md](phase-5.md) |
+| 6 | 대화 메모리 + 응답 캐시(Redis, graceful) | _(미커밋)_ | [phase-6.md](phase-6.md) |
 
 ## 큰 그림 (계층)
 
