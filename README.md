@@ -177,23 +177,30 @@ docker compose up -d neo4j              # Phase 9: GraphRAG
 - 📌 캐시는 완전일치 MVP. 진짜 시맨틱(임베딩 유사도)은 RediSearch 필요 → 후속.
 - 🔍 멀티턴 대화 + 같은 질문 2회 호출 시 두 번째가 빠른지 확인.
 
-### Phase 7 — 인증/RBAC + 영속화 (Postgres + Alembic)
+### [x] Phase 7 — 인증/RBAC + 영속화 (Postgres + Alembic)
 - 🎯 사용자/대화/메시지를 DB에 남기고 접근을 보호한다.
 - 🛠 `core/security.py`(JWT/해싱) → `api/deps.get_current_user` → `models/*` 마이그레이션
   (`migration/env.py` 에 `Base.metadata` 연결 후 `make migrate`) → 엔드포인트에 `Depends` 부착
-- ✅ 토큰 없이는 차단, 대화/메시지가 DB에 저장됨.
+- ✅ `AUTH_ENABLED=true` 면 토큰 없이는 차단 + 대화/메시지가 DB에 저장됨.
+  **기본(false)은 기존처럼 무인증·Postgres 없이 동작**(Phase 6 의 Redis 우아한 강등과 동일 철학).
 - 🔍 `make migrate` 성공 + 토큰 유무에 따른 401/200 + 메시지 row 적재 확인.
 
-### Phase 8 — 무거운 적재를 워커로 분리 (ARQ/Celery)
-- 🎯 대형문서 적재가 요청을 막지 않게 한다.
-- 🛠 `workers/tasks.ingest_document` 구현 → `endpoints/document.py` 를 "enqueue 후 202" 로 변경
-- ✅ 적재 API 가 즉시 202 반환, 실제 인덱싱은 백그라운드. 검색 기능은 그대로.
-- 🔍 큰 문서 적재 시 API 응답이 즉시 오고, 잠시 후 검색에 반영되는지 확인.
+> **진행 순서 변경:** Phase 7 이후는 **11(관측성) → 9(GraphRAG) → 10(라우팅) → 8(워커, 보류) → 12** 순서로
+> 진행한다. 11 은 독립적이라 먼저 깔아두면 이후 단계 디버깅에 이득, 10 은 9 의 graph 엔진이 있어야
+> 고를 대상이 생기므로 9 다음. 8(워커 분리)은 대형문서 적재가 실제로 병목이 될 때 한다.
 
-### Phase 9 — GraphRAG 파이프라인 추가
+### [x] Phase 11 — 관측성: Langfuse 실연동
+- 🎯 검색→프롬프트→토큰→비용을 한 trace 로 묶어 품질을 추적한다.
+- 🛠 `core/observability.py` 의 `init/get_langgraph_callback/shutdown` 실구현
+  → `rag_agent` 실행 config 에 콜백 주입 → `.env` 에 `LANGFUSE_ENABLED=true`
+- ✅ 모든 요청이 Langfuse 대시보드에 trace 로 남음(요청 미들웨어 trace_id 와 연계).
+- 🔍 한 요청 후 Langfuse 에 span 트리(retrieve/generate 등)가 보이는지 확인.
+
+### Phase 9 — GraphRAG 파이프라인 추가 *(다음 차례)*
 - 🎯 엔티티/관계 그래프 기반 검색을 더한다. (Vector RAG 는 그대로 둔 채 *옆에* 추가)
 - 🛠 `core/graph_db.py`(Neo4j) → `ir/graph/ingest/{extractor,cluster,summarizer}`
-  (Phase 8 워커에서 실행) → `ir/graph/search/{local,global_}` → `config/prompts/graphrag/*`
+  (워커는 보류 중이므로 Phase 3 처럼 엔드포인트에서 직접 실행, Phase 8 에서 이관)
+  → `ir/graph/search/{local,global_}` → `config/prompts/graphrag/*`
 - ✅ `rag_mode="graph_local"`/`"graph_global"` 로 호출하면 그래프 기반 답변. vector 모드도 그대로.
 - 🔍 관계형 질문(local) / 광범위 요지 질문(global) 각각 테스트.
 
@@ -203,12 +210,12 @@ docker compose up -d neo4j              # Phase 9: GraphRAG
 - ✅ 사용자가 모드를 안 정해도 질문 성격에 맞는 엔진이 선택됨.
 - 🔍 여러 유형 질문을 `auto` 로 던져 적절한 엔진이 선택되는지(로그/trace) 확인.
 
-### Phase 11 — 관측성: Langfuse 실연동
-- 🎯 검색→프롬프트→토큰→비용을 한 trace 로 묶어 품질을 추적한다.
-- 🛠 `core/observability.py` 의 `init/get_langgraph_callback/shutdown` 실구현
-  → `rag_agent` 실행 config 에 콜백 주입 → `.env` 에 `LANGFUSE_ENABLED=true`
-- ✅ 모든 요청이 Langfuse 대시보드에 trace 로 남음(요청 미들웨어 trace_id 와 연계).
-- 🔍 한 요청 후 Langfuse 에 span 트리(retrieve/generate 등)가 보이는지 확인.
+### Phase 8 — 무거운 적재를 워커로 분리 (ARQ/Celery) *(보류)*
+- 🎯 대형문서 적재가 요청을 막지 않게 한다.
+- 🛠 `workers/tasks.ingest_document` 구현 → `endpoints/document.py` 를 "enqueue 후 202" 로 변경
+- ✅ 적재 API 가 즉시 202 반환, 실제 인덱싱은 백그라운드. 검색 기능은 그대로.
+- 📌 **현황:** 적재가 아직 병목이 아니라 보류. 대형문서/GraphRAG 인덱싱이 느려지면 그때 분리.
+- 🔍 큰 문서 적재 시 API 응답이 즉시 오고, 잠시 후 검색에 반영되는지 확인.
 
 ### Phase 12 — 프로덕션 하드닝
 - 🎯 운영에 안전한 형태로 마감.
@@ -225,13 +232,12 @@ docker compose up -d neo4j              # Phase 9: GraphRAG
 ```
 P0 부팅
  └ P1 동기챗 ── P2 스트리밍            (LLM 계층 완성)
-        └ P3 VectorRAG ── P4 하이브리드+리랭크   (검색 품질)
-               └ P5 LangGraph ── P6 메모리/캐시
-                      └ P7 인증/DB ── P8 워커
-                             └ P9 GraphRAG ── P10 라우팅/하이브리드
-                                    └ P11 Langfuse ── P12 하드닝
+        └ P3 VectorRAG ── P4 하이브리드+리랭크(스텁)   (검색 품질)
+               └ P5 LangGraph ── P6 메모리/캐시 ── P7 인증/DB ── P11 Langfuse   [완료]
+                             └ P9 GraphRAG ── P10 라우팅/하이브리드   ← 다음
+                                    └ P8 워커(보류) ── P12 하드닝
 ```
 
 - **최소 동작 데모**까지: P0→P3 (단순 Vector RAG 챗봇)
-- **실서비스 기본기**까지: ~P8 (품질·메모리·인증·확장성)
-- **풀 기능**: ~P12 (GraphRAG·자동라우팅·관측성·운영)
+- **실서비스 기본기**까지: ~P7 + P11 (품질·메모리·인증·관측성)
+- **풀 기능**: ~P12 (GraphRAG·자동라우팅·워커·운영)
