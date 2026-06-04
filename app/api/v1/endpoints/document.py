@@ -7,15 +7,21 @@
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from typing import Annotated
 
+from fastapi import APIRouter, Depends, HTTPException
+
+from app.api.deps import get_optional_user
+from app.models.user import User
 from app.schemas.document import DocumentUpload, IngestTarget
 
 router = APIRouter()
 
 
 @router.post("/ingest")
-async def ingest(payload: DocumentUpload) -> dict:
+async def ingest(
+    payload: DocumentUpload, user: Annotated[User | None, Depends(get_optional_user)]
+) -> dict:
     if payload.content is None:
         raise HTTPException(
             status_code=400, detail="content 가 필요합니다 (Phase 3 는 인라인 content 만 지원)."

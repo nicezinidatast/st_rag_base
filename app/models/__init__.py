@@ -7,3 +7,9 @@
 
 주의: Alembic 마이그레이션(migration/)이 이 모델들을 스캔하도록 env.py 에서 import.
 """
+from app.models.base import Base
+from app.models.conversation import Conversation
+from app.models.message import Message
+from app.models.user import User
+
+__all__ = ["Base", "Conversation", "Message", "User"]
