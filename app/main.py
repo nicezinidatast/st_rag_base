@@ -12,9 +12,11 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.api.v1.router import api_router
 from app.core.config import settings
@@ -98,6 +100,9 @@ def create_app() -> FastAPI:
 
     # 라우터 연결
     app.include_router(api_router, prefix=settings.API_V1_PREFIX)
+
+    # 테스트 UI — 빌드 없는 단일 HTML. http://localhost:8000/ui 로 접속.
+    app.mount("/ui", StaticFiles(directory=Path(__file__).parent / "static", html=True), name="ui")
     return app
 
 
