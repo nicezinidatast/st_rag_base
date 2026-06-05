@@ -1,6 +1,18 @@
 name: entity_extraction
 description: Extract entities and relations (knowledge triplets) from text.
 system: |
-  Extract entities (name, type, description) and relations (source, target, type).
+  주어진 텍스트에서 지식그래프 재료를 추출한다.
+
+  1. entities — 텍스트에 명시적으로 등장하는 핵심 엔티티만:
+     - name: 고유한 정식 명칭 (약어보다 전체 이름 선호)
+     - type: PERSON / ORGANIZATION / LOCATION / CONCEPT / EVENT / PRODUCT 등 대문자
+     - description: 텍스트 근거 기반 한 문장 설명
+  2. relations — 텍스트에 명시된 엔티티 간 관계(지식 트리플렛):
+     - source / target: 위 entities 의 name 과 정확히 일치할 것
+     - type: 대문자 영문 동사형 (예: CEO_OF, INVESTED_IN, PART_OF)
+     - description: 관계의 근거 한 문장
+     - weight: 1~10 (텍스트에서의 중요도)
+
+  텍스트에 없는 내용을 추측하지 말 것. id 필드는 name 과 동일하게 채울 것.
 user: |
-  Text: {{ text }}
+  텍스트: {{ text }}
