@@ -45,9 +45,24 @@ class OpenAIChatModel:
         )
         return cast("ChatCompletion", resp).choices[0].message.content or ""
 
-    def astream(self, messages: list[dict], **kwargs) -> AsyncIterator[str]:
-        """스트리밍형: 토큰 조각을 yield. → Phase 2 에서 구현."""
-        raise NotImplementedError("OpenAIChatModel.astream 은 Phase 2 에서 구현")
+    async def astream(self, messages: list[dict], **kwargs) -> AsyncIterator[str]:
+        """스트리밍형: OpenAI stream=True 응답을 토큰 조각씩 yield.
+
+        OpenAI 는 청크마다 delta.content 에 토큰 조각을 담아 보낸다(없는 청크도 있다).
+        내용이 있는 조각만 흘려보낸다. HTTP/SSE 는 모른다(streaming.py 가 포장).
+        """
+        stream = await self._client.chat.completions.create(
+            model=self.model,
+            messages=cast("list[ChatCompletionMessageParam]", messages),
+            stream=True,
+            **kwargs,
+        )
+        async for chunk in stream:
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta.content
+            if delta:
+                yield delta
 
 
 # TODO(Phase 3): class OpenAIEmbedder (dim / aembed_documents / aembed_query 구현)

@@ -52,13 +52,17 @@ ChatRequest.stream 플래그로 분기한다.
 from __future__ import annotations
 
 import json
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import Any
 
 # SSE 표준 이벤트 이름 컨벤션 (프론트와 합의해 고정해두면 좋다)
 EVENT_TOKEN = "token"   # 답변 토큰 조각
 EVENT_META = "meta"     # 검색 출처/단계 등 메타데이터
 EVENT_DONE = "done"     # 스트림 종료 신호
 EVENT_ERROR = "error"   # 에러 발생
+
+# 키가 없을 때 동기/스트리밍 양쪽에서 그대로 result 로 내보내는 안내 값.
+NO_API_KEY_MESSAGE = "OpenAI API key 가 없습니다."
 
 
 def sse(data: Any, event: str = EVENT_TOKEN) -> dict:
@@ -73,25 +77,38 @@ def sse(data: Any, event: str = EVENT_TOKEN) -> dict:
 
 
 async def stream_chat(request: Any) -> AsyncIterator[dict]:
-    """[스트리밍 응답용 generator — 구현 가이드]
+    """[스트리밍 응답용 generator — Phase 2 임시 구현]
 
-    여기가 'EventSourceResponse 로 감쌀 내용물'이다. 아래 순서로 구현하면 된다:
+    원래는 LangGraph 의 astream_events 로 토큰을 흘려야 하지만(아래 미래 가이드),
+    Phase 2 에는 아직 graph 가 없다. 그래서 run_chat_sync 와 대칭으로 검색/노드 없이
+    ChatModel.astream 을 직접 호출해 토큰만 흘린다. (RAG 없음)
 
-        1. graph = build_graph()
-        2. (선택) yield sse({"stage": "retrieving"}, EVENT_META)
-        3. async for ev in graph.astream_events(state, version="v2"):
-               # ev 에서 LLM 토큰만 골라:
-               #   if ev["event"] == "on_chat_model_stream":
-               #       yield sse(ev["data"]["chunk"].content, EVENT_TOKEN)
-        4. 출처/인용은 EVENT_META 로 따로 흘려보낸다.
-        5. 마지막에 yield sse("[DONE]", EVENT_DONE)
-        6. try/except 로 감싸 에러 시 yield sse(str(e), EVENT_ERROR)
-           (스트림 도중 죽으면 HTTP 상태코드로 못 알리므로 이벤트로 알려야 한다)
+        graph = build_graph()                                    # ← Phase 5 에서 이렇게 교체
+        async for ev in graph.astream_events(state, version="v2"):
+            if ev["event"] == "on_chat_model_stream":
+                yield sse(ev["data"]["chunk"].content, EVENT_TOKEN)
+        # 출처/인용은 EVENT_META 로 따로 흘려보낸다.
 
     주의: 이 함수는 HTTP 를 몰라야 한다(헤더/상태코드 X). 오직 이벤트만 yield.
+    스트림 도중 죽으면 HTTP 상태코드로 못 알리므로 에러도 이벤트로 알린다(EVENT_ERROR).
     """
-    raise NotImplementedError("stream_chat generator 미구현")
-    yield  # pragma: no cover  (async generator 로 만들기 위한 표식)
+    from app.clients.chat_model import get_chat_model
+    from app.core.config import settings
+
+    # [개발 편의 가드] 키가 없으면 안내 값을 토큰으로 흘리고 끝낸다. (run_chat_sync 와 동일)
+    if not settings.OPENAI_API_KEY:
+        yield sse(NO_API_KEY_MESSAGE, EVENT_TOKEN)
+        yield sse("[DONE]", EVENT_DONE)
+        return
+
+    chat_model = get_chat_model()  # settings.DEFAULT_CHAT_MODEL 사용
+    messages = [{"role": m.role, "content": m.content} for m in request.messages]
+    try:
+        async for token in chat_model.astream(messages):
+            yield sse(token, EVENT_TOKEN)
+        yield sse("[DONE]", EVENT_DONE)
+    except Exception as e:  # noqa: BLE001  스트림 중 에러는 이벤트로만 알릴 수 있다
+        yield sse(str(e), EVENT_ERROR)
 
 
 async def run_chat_sync(request: Any) -> dict:
@@ -109,15 +126,9 @@ async def run_chat_sync(request: Any) -> dict:
     from app.core.config import settings
 
     # [개발 편의 가드] 키가 없으면 OpenAI 가 난해한 인증 에러를 던지므로,
-    # 대신 무엇을 해야 하는지 알려주는 답변을 그대로 돌려준다. (키 채우면 자동 해제)
+    # 대신 안내 값을 answer 로 그대로 돌려준다. (키 채우면 자동 해제)
     if not settings.OPENAI_API_KEY:
-        return {
-            "answer": (
-                "OpenAI API key 가 설정되지 않았습니다. "
-                ".env 의 OPENAI_API_KEY 를 입력하세요."
-            ),
-            "citations": [],
-        }
+        return {"answer": NO_API_KEY_MESSAGE, "citations": []}
 
     chat_model = get_chat_model()  # settings.DEFAULT_CHAT_MODEL 사용
     messages = [{"role": m.role, "content": m.content} for m in request.messages]

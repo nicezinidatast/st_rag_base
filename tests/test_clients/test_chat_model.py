@@ -39,3 +39,33 @@ async def test_achat_extracts_message_content(monkeypatch):
 
     out = await model.achat([{"role": "user", "content": "hi"}])
     assert out == "안녕하세요"
+
+
+async def test_astream_yields_token_chunks(monkeypatch):
+    """astream 이 OpenAI stream 청크의 delta.content 만 골라 yield 하는지."""
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", "test-key")
+    model = OpenAIChatModel("gpt-4o-mini")
+
+    class _Delta:
+        def __init__(self, content):
+            self.content = content
+
+    class _Choice:
+        def __init__(self, content):
+            self.delta = _Delta(content)
+
+    class _Chunk:
+        def __init__(self, content):
+            self.choices = [_Choice(content)]
+
+    async def _fake_create(**kwargs):
+        async def _gen():
+            for c in ["안", "녕", None, "!"]:  # None 조각은 건너뛰어야 한다
+                yield _Chunk(c)
+
+        return _gen()
+
+    monkeypatch.setattr(model._client.chat.completions, "create", _fake_create)
+
+    tokens = [t async for t in model.astream([{"role": "user", "content": "hi"}])]
+    assert tokens == ["안", "녕", "!"]
