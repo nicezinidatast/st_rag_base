@@ -16,10 +16,13 @@ from app.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
-def _build_messages(question: str, context: str) -> list[dict]:
-    """질문(+검색 컨텍스트)을 LLM 메시지 목록으로 만든다.
+def _build_messages(
+    question: str, context: str, history: list[dict] | None = None
+) -> list[dict]:
+    """질문(+검색 컨텍스트 + 이전 대화)을 LLM 메시지 목록으로 만든다.
 
-    컨텍스트가 있으면 system 메시지로 앞에 끼운다(없으면 질문만).
+    순서: system(컨텍스트) → 이전 대화 턴(history) → 현재 user 질문.
+    컨텍스트가 없으면 system 은 생략, history 도 없으면 질문만.
     """
     messages: list[dict] = []
     if context:
@@ -35,6 +38,8 @@ def _build_messages(question: str, context: str) -> list[dict]:
                 ),
             }
         )
+    if history:
+        messages.extend({"role": m["role"], "content": m["content"]} for m in history)
     messages.append({"role": "user", "content": question})
     return messages
 
@@ -45,9 +50,12 @@ async def generate(state: AgentState) -> AgentState:
 
     spec = state.get("model") or settings.DEFAULT_CHAT_MODEL
     has_context = bool(state.get("context"))
-    messages = _build_messages(state.get("query", ""), state.get("context", ""))
+    history = state.get("history") or []
+    messages = _build_messages(state.get("query", ""), state.get("context", ""), history)
 
-    logger.info("node_generate_start", model=spec, has_context=has_context)
+    logger.info(
+        "node_generate_start", model=spec, has_context=has_context, history_msgs=len(history)
+    )
     resp = await get_chat_model(spec).ainvoke(messages)
     content = resp.content
     answer = content if isinstance(content, str) else str(content)

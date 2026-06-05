@@ -99,6 +99,7 @@ async def stream_chat(request: Any) -> AsyncIterator[dict]:
     스트림 도중 죽으면 HTTP 상태코드로 못 알리므로 에러도 이벤트로 알린다(EVENT_ERROR).
     """
     from app.core.config import settings
+    from app.services import cache, memory
 
     # [개발 편의 가드] 챗 LLM 키가 없으면 안내 값을 토큰으로 흘리고 끝낸다. (run_chat_sync 와 동일)
     if not settings.ANTHROPIC_API_KEY:
@@ -106,25 +107,56 @@ async def stream_chat(request: Any) -> AsyncIterator[dict]:
         yield sse("[DONE]", EVENT_DONE)
         return
 
+    spec = request.model or settings.DEFAULT_CHAT_MODEL
+    session_id = request.session_id
+    question = request.question
+
+    # [캐시] 같은 질문이 캐시에 있으면 LLM 없이 저장된 답변을 토큰으로 흘린다.
+    if settings.CACHE_ENABLED:
+        cached = await cache.get_cached(question)
+        if cached is not None:
+            meta = {"model": spec, "citations": [], "session_id": session_id, "cached": True}
+            yield sse(meta, EVENT_META)
+            yield sse(cached, EVENT_TOKEN)
+            yield sse("[DONE]", EVENT_DONE)
+            if settings.MEMORY_ENABLED:
+                await memory.append_message(session_id, "user", question)
+                await memory.append_message(session_id, "assistant", cached)
+            return
+
     from app.services.orchestrator.rag_agent import build_graph
 
-    spec = request.model or settings.DEFAULT_CHAT_MODEL
+    state = _initial_state(request, spec)
+    if settings.MEMORY_ENABLED:
+        state["history"] = await memory.get_history(session_id)
+
     graph = build_graph()
+    parts: list[str] = []
     try:
         meta_sent = False
-        async for ev in graph.astream_events(_initial_state(request, spec), version="v2"):
+        async for ev in graph.astream_events(state, version="v2"):
             kind = ev["event"]
             if kind == "on_chat_model_stream":
                 token = ev["data"]["chunk"].content
                 if isinstance(token, str) and token:
+                    parts.append(token)
                     yield sse(token, EVENT_TOKEN)
             elif kind == "on_chain_end" and ev.get("name") == "retrieve" and not meta_sent:
                 citations = (ev["data"].get("output") or {}).get("citations", [])
-                yield sse({"model": spec, "citations": citations}, EVENT_META)
+                meta = {"model": spec, "citations": citations, "session_id": session_id}
+                yield sse(meta, EVENT_META)
                 meta_sent = True
         yield sse("[DONE]", EVENT_DONE)
     except Exception as e:  # noqa: BLE001  스트림 중 에러는 이벤트로만 알릴 수 있다
         yield sse(str(e), EVENT_ERROR)
+        return
+
+    answer = "".join(parts)
+    if settings.MEMORY_ENABLED:
+        await memory.append_message(session_id, "user", question)
+        await memory.append_message(session_id, "assistant", answer)
+    if settings.CACHE_ENABLED:
+        await cache.set_cached(question, answer)
 
 
 async def run_chat_sync(request: Any) -> dict:
@@ -134,19 +166,50 @@ async def run_chat_sync(request: Any) -> dict:
     endpoints/chat.py 에서 이 반환값을 ChatResponse 로 직렬화한다.
     """
     from app.core.config import settings
+    from app.services import cache, memory
 
     spec = request.model or settings.DEFAULT_CHAT_MODEL
+    session_id = request.session_id
+    question = request.question
 
     # [개발 편의 가드] 챗 LLM 키가 없으면 난해한 인증 에러 대신
     # 안내 값을 answer 로 그대로 돌려준다. (키 채우면 자동 해제)
     if not settings.ANTHROPIC_API_KEY:
-        return {"answer": NO_API_KEY_MESSAGE, "citations": [], "model": spec}
+        return {
+            "answer": NO_API_KEY_MESSAGE, "citations": [], "model": spec, "session_id": session_id,
+        }
+
+    # [캐시] 같은 질문이면 LLM 없이 캐시된 답변 반환(히트 시 citations 는 비움).
+    if settings.CACHE_ENABLED:
+        cached = await cache.get_cached(question)
+        if cached is not None:
+            if settings.MEMORY_ENABLED:
+                await memory.append_message(session_id, "user", question)
+                await memory.append_message(session_id, "assistant", cached)
+            return {
+                "answer": cached, "citations": [], "model": spec,
+                "session_id": session_id, "cached": True,
+            }
 
     from app.services.orchestrator.rag_agent import build_graph
 
-    final = await build_graph().ainvoke(_initial_state(request, spec))
+    state = _initial_state(request, spec)
+    if settings.MEMORY_ENABLED:
+        state["history"] = await memory.get_history(session_id)
+
+    final = await build_graph().ainvoke(state)
+    answer = final.get("answer", "")
+    citations = final.get("citations", [])
+
+    if settings.MEMORY_ENABLED:
+        await memory.append_message(session_id, "user", question)
+        await memory.append_message(session_id, "assistant", answer)
+    if settings.CACHE_ENABLED:
+        await cache.set_cached(question, answer)
+
     return {
-        "answer": final.get("answer", ""),
-        "citations": final.get("citations", []),
+        "answer": answer,
+        "citations": citations,
         "model": final.get("model", spec),
+        "session_id": session_id,
     }

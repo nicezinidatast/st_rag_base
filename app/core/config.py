@@ -48,6 +48,16 @@ class Settings(BaseSettings):
     # ── Redis (세션/대화이력/시맨틱 캐시) ─────────────────────
     REDIS_URL: str = "redis://localhost:6379/0"
 
+    # ── 대화 메모리 / 캐시 (Phase 6) ──────────────────────────
+    # MEMORY_ENABLED: 세션별 대화 이력을 generate 에 주입(멀티턴).
+    # CACHE_ENABLED: 반복 질문 캐시(완전일치)로 LLM 호출 절약.
+    # Redis 가 없거나 죽어도 채팅은 막지 않는다(이력/캐시만 스킵).
+    MEMORY_ENABLED: bool = True
+    HISTORY_MAX_MESSAGES: int = 20          # 이력에 유지/주입할 최근 메시지 수
+    HISTORY_TTL_SECONDS: int = 7 * 24 * 3600
+    CACHE_ENABLED: bool = True
+    CACHE_TTL_SECONDS: int = 3600
+
     # ── 개발/테스트 토글 ──────────────────────────────────────
     # MOCK_RETRIEVER: true 면 실제 Vector 검색 대신 MockRetriever 가
     # 포켓몬 가상 문서 5건을 고정 반환한다(Qdrant/임베딩 없이 RAG 흐름 점검용).

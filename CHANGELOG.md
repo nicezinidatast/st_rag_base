@@ -122,6 +122,22 @@
 - **테스트:** `tests/test_graph/test_workflow.py` 신설(노드 단위 + 그래프 e2e).
 - **커밋:** `c456461` feat(workflow) / `a57e101` docs(phases)
 
+## [x] Phase 6 — 대화 메모리 + 응답 캐시 (Redis)
+
+- **목표:** 멀티턴 맥락 유지(이전 대화 generate 주입) + 반복 질문 캐싱으로 LLM 절감.
+- **주요 변경:**
+  - `services/memory.py` — Redis 리스트 세션 이력(`append_message`/`get_history`, LTRIM+TTL).
+  - `services/cache.py` — 정규화 질문 **완전일치** 캐시(시맨틱은 후속). 히트 시 LLM 스킵.
+  - `workflow/state.py`·`nodes/generate.py` — `history` 추가, `_build_messages` 가 이전 턴 주입.
+  - `utils/streaming.py` — 진입 시 캐시 조회 → 이력 로드/주입 → 응답 후 적재+캐시.
+    `endpoints/chat.py` — `session_id` 1회 확정.
+  - `core/redis.py`·`main.py` — 빠른 타임아웃 + 가용성 플래그(lifespan ping). **Redis 미기동에도
+    채팅 정상·빠름**(요청당 즉시 스킵, 20s→0.35s).
+  - `config.py`/`.env.example` — `MEMORY_ENABLED`/`HISTORY_*`/`CACHE_*`.
+- **테스트:** `fakeredis`(dev) + conftest autouse 픽스처. `test_services/test_{memory,cache}.py`,
+  `test_chat.py`(캐시 히트·이력 주입). `pytest` 45 passed.
+- **커밋:** _(미커밋)_
+
 ## [x] Phase 5+ — 채팅 모델 LangChain `BaseChatModel` 전환 + 정리
 
 - **목표:** 자체 `ChatModel` Protocol/래퍼 → LangChain 통합 모델. LangGraph `astream_events(v2)`
