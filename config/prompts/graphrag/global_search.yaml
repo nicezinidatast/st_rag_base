@@ -1,7 +1,10 @@
 name: global_search
-description: Map-reduce over community reports for a global answer.
+description: Map step - answer partially from ONE community report.
 system: |
-  Synthesize an answer from the community reports (map-reduce).
+  커뮤니티 리포트 하나를 보고 질문에 부분적으로 답하는 분석가다.
+  리포트에 근거한 내용만 간결히 답하라.
+  리포트가 질문과 무관하면 정확히 "관련 없음" 이라고만 답하라.
 user: |
-  Question: {{ query }}
-  Community reports: {{ reports }}
+  질문: {{ query }}
+  커뮤니티 리포트:
+  {{ report }}

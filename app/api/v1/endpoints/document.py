@@ -3,7 +3,7 @@
 [Phase 3 — 임시: 엔드포인트에서 직접 적재]
 - 원래는 무거운 작업이라 워커 큐로 보내야 하지만(Phase 8), 지금은 단순함을 위해
   vector ingest 를 직접 await 한다. content(인라인)만 지원(uri 적재는 추후).
-- graph target 은 Phase 9 에서 연결.
+- graph target 은 ir/graph/ingest 파이프라인을 직접 await 한다(Phase 8 에서 워커 이관).
 """
 from __future__ import annotations
 
@@ -34,5 +34,14 @@ async def ingest(
         result["vector_chunks"] = await vector_ingest(
             payload.source_id, payload.content, payload.metadata
         )
-    # IngestTarget.GRAPH → Phase 9
+    if IngestTarget.GRAPH in payload.targets:
+        from app.services.ir.graph.ingest import ingest as graph_ingest
+
+        try:
+            g = await graph_ingest(payload.source_id, payload.content, payload.metadata)
+        except Exception as e:  # noqa: BLE001  적재는 그래프 없이는 무의미 → 명시 에러
+            raise HTTPException(status_code=503, detail=f"graph 적재 실패: {e}") from e
+        result["graph_entities"] = g["entities"]
+        result["graph_relations"] = g["relations"]
+        result["graph_communities"] = g["communities"]
     return result

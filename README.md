@@ -196,7 +196,7 @@ docker compose up -d neo4j              # Phase 9: GraphRAG
 - ✅ 모든 요청이 Langfuse 대시보드에 trace 로 남음(요청 미들웨어 trace_id 와 연계).
 - 🔍 한 요청 후 Langfuse 에 span 트리(retrieve/generate 등)가 보이는지 확인.
 
-### Phase 9 — GraphRAG 파이프라인 추가 *(다음 차례)*
+### [x] Phase 9 — GraphRAG 파이프라인 추가
 - 🎯 엔티티/관계 그래프 기반 검색을 더한다. (Vector RAG 는 그대로 둔 채 *옆에* 추가)
 - 🛠 `core/graph_db.py`(Neo4j) → `ir/graph/ingest/{extractor,cluster,summarizer}`
   (워커는 보류 중이므로 Phase 3 처럼 엔드포인트에서 직접 실행, Phase 8 에서 이관)
@@ -234,7 +234,7 @@ P0 부팅
  └ P1 동기챗 ── P2 스트리밍            (LLM 계층 완성)
         └ P3 VectorRAG ── P4 하이브리드+리랭크(스텁)   (검색 품질)
                └ P5 LangGraph ── P6 메모리/캐시 ── P7 인증/DB ── P11 Langfuse   [완료]
-                             └ P9 GraphRAG ── P10 라우팅/하이브리드   ← 다음
+                             └ P9 GraphRAG [완료] ── P10 라우팅/하이브리드   ← 다음
                                     └ P8 워커(보류) ── P12 하드닝
 ```
 

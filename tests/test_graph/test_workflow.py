@@ -58,6 +58,22 @@ async def test_retrieve_node_blank_query_skips_search():
     assert out == {"documents": [], "context": "", "citations": []}
 
 
+async def test_retrieve_node_routes_graph_local(monkeypatch):
+    import app.services.ir.graph.search.local as local_module
+
+    monkeypatch.setattr(local_module, "LocalGraphRetriever", lambda: _FakeRetriever([_chunk()]))
+    out = await retrieve({"query": "수도?", "top_k": 5, "rag_mode": "graph_local"})
+    assert out["citations"][0]["source_id"] == "doc-1"
+
+
+async def test_retrieve_node_routes_graph_global(monkeypatch):
+    import app.services.ir.graph.search.global_ as global_module
+
+    monkeypatch.setattr(global_module, "GlobalGraphRetriever", lambda: _FakeRetriever([_chunk()]))
+    out = await retrieve({"query": "요지?", "top_k": 5, "rag_mode": "graph_global"})
+    assert out["documents"][0]["score"] == 0.9
+
+
 async def test_grade_node_uses_top_document_score():
     out = await grade({"documents": [{"score": 0.3}, {"score": 0.8}]})
     assert out["grade"] == 0.8

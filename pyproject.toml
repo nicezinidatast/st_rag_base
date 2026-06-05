@@ -38,12 +38,17 @@ dependencies = [
     "structlog>=24.4.0",
     "langfuse>=2.53.0",        # LLM 트레이싱
     "sentence-transformers>=5.5.1",
+    # tokenizers 0.22.2 는 XLM-RoBERTa 계열(bge-m3 등) 인코딩 시 Windows 에서
+    # 네이티브 크래시(access violation). 0.22.1 정상 실측 → 해당 릴리스만 제외.
+    "tokenizers!=0.22.2",
     "pypdf>=6.12.2",
     "langchain-anthropic>=1.4.4",
     "langchain-openai>=1.2.2",
     "pyjwt>=2.13.0",
     "bcrypt>=5.0.0",
     "langchain>=1.3.4",
+    "igraph>=1.0.0",
+    "leidenalg>=0.12.0",
 ]
 
 # 개발 전용 의존성 (PEP 735). `uv sync` 시 기본 설치, `uv sync --no-dev` 로 제외.
