@@ -198,3 +198,38 @@
   Langfuse Cloud E2E: span 트리(analyze→retrieve→grade→generate→GENERATION) +
   토큰/비용 집계 + X-Request-ID == trace id 일치 확인.
 - **커밋:** _(미커밋)_
+
+## [x] Phase 9 — GraphRAG 파이프라인 추가
+
+> 진행 순서 변경: P7 → P11 → **P9** → P10 → P8(보류) → P12 (README 로드맵 참고).
+
+- **목표:** 엔티티/관계 그래프 기반 검색을 Vector RAG 옆에 추가한다.
+  `rag_mode="graph_local"`/`"graph_global"` 호출 시 Neo4j GraphRAG 답변. vector 모드는 그대로.
+- **주요 변경:**
+  - 의존성 추가: `igraph`, `leidenalg` (Leiden 커뮤니티 탐지).
+  - `core/graph_db.py` — `get_graph_driver`(lru_cache AsyncDriver) + `bootstrap_schema`
+    (Entity/Community UNIQUE 제약, `:RELATED{type,weight}`, `:IN_COMMUNITY`, 풀텍스트 인덱스 2종).
+    MERGE 멱등 적재: description 은 긴 쪽 유지, source_ids 누적.
+  - `ir/graph/ingest/extractor.py` — LLM 구조화 추출(엔티티 목록, 관계 삼중항 JSON).
+  - `ir/graph/ingest/cluster.py` — igraph + leidenalg Leiden 군집화 → Community+IN_COMMUNITY MERGE.
+    Python 실행 결정: GDS/graspologic 없이 로직 가시성·학습 용이, Neo4j 는 순수 저장소.
+  - `ir/graph/ingest/summarizer.py` — 커뮤니티 멤버 목록 → LLM 리포트 → `Community.report` 갱신.
+  - `ir/graph/ingest/__init__.py` — `ingest_graph(source_id, content, llm, driver)`:
+    extract → cluster → summarize 직렬 파이프라인.
+  - `ir/graph/search/local.py` — 풀텍스트 인덱스 앵커 → 1-hop 서브그래프 → 컨텍스트 반환.
+    앵커 = 풀텍스트 인덱스: LLM 0회, Lucene 직접 조회.
+  - `ir/graph/search/global_.py` — 커뮤니티 리포트 top_k 조회 → asyncio.gather Map →
+    관련 리포트 필터 → generate 노드 Reduce 위임. 비용 ≤ top_k+1 LLM 호출.
+  - `utils/prompts.py` + `config/prompts/graphrag/` — YAML 프롬프트 로더(LRU) +
+    `extract.yaml` / `summarize.yaml` / `map_community.yaml`.
+  - `workflow/nodes/retrieve.py` — `rag_mode` 분기: vector / graph_local / graph_global.
+    `auto`/`hybrid` 는 현재 vector 로 동작(Phase 10 에서 구현).
+  - `api/v1/endpoints/document.py` — `target` 필드(`VECTOR`|`GRAPH`) 추가.
+    `GRAPH` 이면 `ingest_graph` 직접 호출(Phase 3 패턴, 워커 이관은 Phase 8).
+  - 우아한 강등: 검색 시 Neo4j 다운 → 빈 컨텍스트로 채팅 생존(기존 try/except);
+    적재 시 Neo4j 미연결 → 503 명시 에러.
+- **테스트:** `test_core/test_graph_db.py`(2), `test_ir/test_graph_extractor.py`(2),
+  `test_ir/test_graph_cluster.py`(2), `test_ir/test_graph_summarizer.py`(1),
+  `test_ir/test_graph_ingest.py`(3), `test_ir/test_graph_search.py`(7),
+  `test_utils/test_prompts.py`(3). `pytest` 83 passed. ruff / mypy 통과.
+- **커밋:** _(미커밋)_
