@@ -13,12 +13,15 @@
 """
 from __future__ import annotations
 
+from typing import Annotated
 from uuid import uuid4
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
+from app.api.deps import get_optional_user
+from app.models.user import User
 from app.schemas.chat import ChatRequest, ChatResponse
 from app.utils.logger import get_logger
 from app.utils.streaming import run_chat_sync, stream_chat
@@ -28,7 +31,7 @@ logger = get_logger(__name__)
 
 
 @router.post("")
-async def chat(request: ChatRequest):
+async def chat(request: ChatRequest, user: Annotated[User | None, Depends(get_optional_user)]):
     """기본은 스트리밍(SSE). request.stream=False 면 동기 JSON 응답.
 
     *** 동작 흐름 ***
@@ -45,12 +48,13 @@ async def chat(request: ChatRequest):
         session_id=request.session_id,
         question_chars=len(request.question),
     )
+    user_id = user.id if user is not None else None  # Phase 7: 인증 시 대화 DB 영속화 키
     if request.stream:
         # generator 를 SSE 포장지로 감싼다. media_type 은 sse-starlette 가 자동 설정.
-        return EventSourceResponse(stream_chat(request))
+        return EventSourceResponse(stream_chat(request, user_id=user_id))
 
     # 동기 경로: 전체 답변을 만들어 한 번에 반환.
-    result = await run_chat_sync(request)
+    result = await run_chat_sync(request, user_id=user_id)
     response = ChatResponse(
         session_id=result["session_id"],
         answer=result["answer"],

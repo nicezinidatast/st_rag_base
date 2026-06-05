@@ -37,8 +37,11 @@ class Settings(BaseSettings):
     LOG_FILE: str = "logs/app.log"
     LOG_JSON_CONSOLE: bool = False
 
-    # ── 보안 / 인증 ───────────────────────────────────────────
+    # ── 보안 / 인증 (Phase 7) ─────────────────────────────────
+    # AUTH_ENABLED: true 면 chat/document 에 JWT 인증을 강제하고 대화를 DB에 저장.
+    # false(기본)면 기존 데모/테스트가 토큰·Postgres 없이 그대로 동작한다.
     # SECRET_KEY: JWT 서명 키. prod에서는 반드시 강한 랜덤값으로 교체.
+    AUTH_ENABLED: bool = False
     SECRET_KEY: str = Field(default="change-me", min_length=8)
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24
 

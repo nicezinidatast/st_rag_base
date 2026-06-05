@@ -86,7 +86,7 @@ def _initial_state(request: Any, spec: str) -> dict:
     }
 
 
-async def stream_chat(request: Any) -> AsyncIterator[dict]:
+async def stream_chat(request: Any, user_id: int | None = None) -> AsyncIterator[dict]:
     """[스트리밍 응답용 generator — Phase 5+]
 
     LangGraph 를 astream_events(version="v2") 로 돌린다. LangChain 챗 모델 호출이
@@ -99,7 +99,7 @@ async def stream_chat(request: Any) -> AsyncIterator[dict]:
     스트림 도중 죽으면 HTTP 상태코드로 못 알리므로 에러도 이벤트로 알린다(EVENT_ERROR).
     """
     from app.core.config import settings
-    from app.services import cache, memory
+    from app.services import cache, memory, persistence
 
     # [개발 편의 가드] 챗 LLM 키가 없으면 안내 값을 토큰으로 흘리고 끝낸다. (run_chat_sync 와 동일)
     if not settings.ANTHROPIC_API_KEY:
@@ -122,6 +122,7 @@ async def stream_chat(request: Any) -> AsyncIterator[dict]:
             if settings.MEMORY_ENABLED:
                 await memory.append_message(session_id, "user", question)
                 await memory.append_message(session_id, "assistant", cached)
+            await persistence.save_exchange(session_id, user_id, question, cached)
             return
 
     from app.services.orchestrator.rag_agent import build_graph
@@ -157,16 +158,17 @@ async def stream_chat(request: Any) -> AsyncIterator[dict]:
         await memory.append_message(session_id, "assistant", answer)
     if settings.CACHE_ENABLED:
         await cache.set_cached(question, answer)
+    await persistence.save_exchange(session_id, user_id, question, answer)
 
 
-async def run_chat_sync(request: Any) -> dict:
+async def run_chat_sync(request: Any, user_id: int | None = None) -> dict:
     """[동기 응답용 — Phase 5]
 
     LangGraph 를 graph.ainvoke(state) 로 끝까지 돌려 최종 state 에서 답변/출처를 꺼낸다.
     endpoints/chat.py 에서 이 반환값을 ChatResponse 로 직렬화한다.
     """
     from app.core.config import settings
-    from app.services import cache, memory
+    from app.services import cache, memory, persistence
 
     spec = request.model or settings.DEFAULT_CHAT_MODEL
     session_id = request.session_id
@@ -186,6 +188,7 @@ async def run_chat_sync(request: Any) -> dict:
             if settings.MEMORY_ENABLED:
                 await memory.append_message(session_id, "user", question)
                 await memory.append_message(session_id, "assistant", cached)
+            await persistence.save_exchange(session_id, user_id, question, cached)
             return {
                 "answer": cached, "citations": [], "model": spec,
                 "session_id": session_id, "cached": True,
@@ -206,6 +209,7 @@ async def run_chat_sync(request: Any) -> dict:
         await memory.append_message(session_id, "assistant", answer)
     if settings.CACHE_ENABLED:
         await cache.set_cached(question, answer)
+    await persistence.save_exchange(session_id, user_id, question, answer)
 
     return {
         "answer": answer,
