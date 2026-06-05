@@ -6,7 +6,7 @@
   state["citations"](응답 출처) 를 채운다.
 - 검색 실패는 비치명: 컨텍스트 없이 진행한다(채팅 자체는 막지 않음).
 
-[추후] rag_mode 로 graph-local/global 분기, HybridRetriever(Phase 4) 연결.
+[Phase 9] rag_mode 로 graph_local/graph_global 분기. auto/hybrid 라우팅은 Phase 10.
 """
 from __future__ import annotations
 
@@ -27,15 +27,26 @@ async def retrieve(state: AgentState) -> AgentState:
         return {"documents": [], "context": "", "citations": []}
 
     top_k = state.get("top_k", 5)
+    rag_mode = state.get("rag_mode", "auto")
     retriever: Retriever
     if settings.MOCK_RETRIEVER:
         from app.services.ir.mock import MockRetriever
 
         retriever = MockRetriever()
-    else:
+    elif rag_mode == "graph_local":
+        from app.services.ir.graph.search.local import LocalGraphRetriever
+
+        retriever = LocalGraphRetriever()
+    elif rag_mode == "graph_global":
+        from app.services.ir.graph.search.global_ import GlobalGraphRetriever
+
+        retriever = GlobalGraphRetriever()
+    else:  # vector / auto / hybrid → 기존 vector 경로 (auto·hybrid 분기는 Phase 10)
         retriever = vsearch.VectorRetriever()
 
-    logger.info("node_retrieve_start", top_k=top_k, mock=settings.MOCK_RETRIEVER)
+    logger.info(
+        "node_retrieve_start", top_k=top_k, rag_mode=rag_mode, mock=settings.MOCK_RETRIEVER
+    )
     try:
         chunks = await retriever.retrieve(query, top_k=top_k)
     except Exception as e:  # noqa: BLE001  검색 실패는 치명적이지 않다 → 컨텍스트 없이 진행
