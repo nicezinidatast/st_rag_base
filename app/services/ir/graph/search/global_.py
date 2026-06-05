@@ -24,6 +24,14 @@ RETURN node.id AS id, node.report AS report, score
 ORDER BY score DESC LIMIT $top_k
 """
 
+# 풀텍스트 0건 시 폴백: 전체 리포트를 균등 점수로 Map 에 투입.
+_ALL_REPORTS_QUERY = """
+MATCH (c:Community)
+WHERE c.report IS NOT NULL
+RETURN c.id AS id, c.report AS report, 1.0 AS score
+ORDER BY c.id LIMIT $top_k
+"""
+
 
 class GlobalGraphRetriever(Retriever):
     async def retrieve(self, query: str, top_k: int = 5, **kwargs) -> list[RetrievedChunk]:
@@ -52,11 +60,17 @@ class GlobalGraphRetriever(Retriever):
 
 async def _fetch_reports(query: str, top_k: int) -> list[dict]:
     q = sanitize_fulltext_query(query)
-    if not q:
-        return []
     async with get_graph_driver().session() as session:
-        result = await session.run(_REPORT_QUERY, q=q, top_k=top_k)
-        return [dict(rec) async for rec in result if rec["report"]]
+        rows: list[dict] = []
+        if q:
+            result = await session.run(_REPORT_QUERY, q=q, top_k=top_k)
+            rows = [dict(rec) async for rec in result if rec["report"]]
+        if not rows:
+            # 거시 질문("전체 요약해줘")은 리포트 본문과 어휘가 안 겹쳐 풀텍스트가
+            # 0건이 되기 쉽다 → 전체 리포트로 폴백 (MS GraphRAG 의 기본 동작).
+            result = await session.run(_ALL_REPORTS_QUERY, top_k=top_k)
+            rows = [dict(rec) async for rec in result if rec["report"]]
+    return rows
 
 
 async def _map_one(query: str, report: str) -> str:

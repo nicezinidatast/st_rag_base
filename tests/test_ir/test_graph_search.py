@@ -100,3 +100,53 @@ async def test_map_one_calls_llm_with_prompt(monkeypatch):
         lambda spec=None: GenericFakeChatModel(messages=iter([AIMessage(content="부분답변")])),
     )
     assert await global_module._map_one("질문", "리포트") == "부분답변"
+
+
+class _FakeReportResult:
+    def __init__(self, records):
+        self._records = records
+
+    def __aiter__(self):
+        async def gen():
+            for r in self._records:
+                yield r
+
+        return gen()
+
+
+class _FakeReportSession:
+    """풀텍스트 쿼리(queryNodes)는 0건, 폴백(MATCH) 쿼리는 전체 리포트 반환."""
+
+    def __init__(self, all_reports):
+        self._all = all_reports
+
+    async def run(self, query, **params):
+        if "queryNodes" in query:
+            return _FakeReportResult([])
+        return _FakeReportResult(self._all)
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return False
+
+
+class _FakeReportDriver:
+    def __init__(self, all_reports):
+        self._all = all_reports
+
+    def session(self):
+        return _FakeReportSession(self._all)
+
+
+async def test_fetch_reports_falls_back_to_all_when_fulltext_misses(monkeypatch):
+    # 거시 질문("전체 요약해줘")은 리포트 본문과 어휘가 안 겹쳐 풀텍스트가 0건이 되기 쉽다
+    # → 전체 리포트 폴백으로 Map 입력을 확보해야 한다.
+    all_reports = [
+        {"id": "c0", "report": "리포트0", "score": 1.0},
+        {"id": "c1", "report": "리포트1", "score": 1.0},
+    ]
+    monkeypatch.setattr(global_module, "get_graph_driver", lambda: _FakeReportDriver(all_reports))
+    rows = await global_module._fetch_reports("적재된 문서 전체를 요약해줘", top_k=5)
+    assert [r["id"] for r in rows] == ["c0", "c1"]
