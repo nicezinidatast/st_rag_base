@@ -1,7 +1,7 @@
 """Mock 검색기 — 실제 Vector DB/임베딩 없이 RAG 흐름을 점검하는 개발용 대역.
 
-settings.MOCK_RETRIEVER 가 true 일 때 _retrieve_context 가 VectorRetriever 대신
-이걸 쓴다. 쿼리와 무관하게 포켓몬에 대한 가상 문서 5건을 고정 반환한다.
+settings.MOCK_RETRIEVER 가 true 일 때 retrieve 노드(workflow/nodes/retrieve.py)가
+VectorRetriever 대신 이걸 쓴다. 쿼리와 무관하게 포켓몬 가상 문서 5건을 고정 반환한다.
 """
 from __future__ import annotations
 

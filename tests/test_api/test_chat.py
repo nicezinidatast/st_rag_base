@@ -6,6 +6,8 @@ ChatModel 과 vector 검색을 가짜로 끼워 실제 LLM/Qdrant 호출 없이
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
+from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+from langchain_core.messages import AIMessage
 
 import app.clients.chat_model as chat_model_module
 import app.services.ir.vector.search as search_module
@@ -15,13 +17,13 @@ from app.services.ir.base import RetrievedChunk
 from app.utils.streaming import NO_API_KEY_MESSAGE
 
 
-class _FakeChatModel:
-    async def achat(self, messages, **kwargs):
-        return "fake-answer"
+def _fake_chat_model(content="fake answer"):
+    """LangChain BaseChatModel 대역. ainvoke=전체 메시지, astream_events=토큰 이벤트.
 
-    async def astream(self, messages, **kwargs):
-        for tok in ["fake", "-", "answer"]:
-            yield tok
+    공백 기준으로 청크가 쪼개진다("fake answer" → "fake"/" "/"answer").
+    매 호출마다 새 인스턴스를 줘야 메시지 이터레이터가 소진되지 않는다.
+    """
+    return GenericFakeChatModel(messages=iter([AIMessage(content=content)]))
 
 
 class _FakeRetriever:
@@ -42,7 +44,7 @@ def test_chat_sync_returns_chat_response(monkeypatch):
     # 챗 LLM(Anthropic) 키가 있어야 가드를 통과해 (가짜) 모델 경로로 간다.
     monkeypatch.setattr(settings, "ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setattr(
-        chat_model_module, "get_chat_model", lambda spec=None: _FakeChatModel()
+        chat_model_module, "get_chat_model", lambda spec=None: _fake_chat_model()
     )
     _patch_no_retrieval(monkeypatch)
 
@@ -54,7 +56,7 @@ def test_chat_sync_returns_chat_response(monkeypatch):
 
     assert resp.status_code == 200
     body = resp.json()
-    assert body["answer"] == "fake-answer"
+    assert body["answer"] == "fake answer"
     assert body["citations"] == []
     assert body["rag_mode"] == "auto"
     assert body["session_id"]  # 자동 생성된 uuid
@@ -65,7 +67,7 @@ def test_chat_sync_echoes_given_session_id(monkeypatch):
     """요청에 session_id 를 주면 응답에 그대로 유지된다."""
     monkeypatch.setattr(settings, "ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setattr(
-        chat_model_module, "get_chat_model", lambda spec=None: _FakeChatModel()
+        chat_model_module, "get_chat_model", lambda spec=None: _fake_chat_model()
     )
     _patch_no_retrieval(monkeypatch)
 
@@ -83,7 +85,7 @@ def test_chat_sync_with_retrieval_includes_citations(monkeypatch):
     """검색 결과가 있으면 citations 가 응답에 실린다."""
     monkeypatch.setattr(settings, "ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setattr(
-        chat_model_module, "get_chat_model", lambda spec=None: _FakeChatModel()
+        chat_model_module, "get_chat_model", lambda spec=None: _fake_chat_model()
     )
     chunk = RetrievedChunk(
         content="서울은 대한민국의 수도이다.",
@@ -115,7 +117,7 @@ def test_chat_sync_model_override_is_echoed(monkeypatch):
 
     def _fake_get(spec=None):
         captured["spec"] = spec
-        return _FakeChatModel()
+        return _fake_chat_model()
 
     monkeypatch.setattr(chat_model_module, "get_chat_model", _fake_get)
     _patch_no_retrieval(monkeypatch)
@@ -157,7 +159,7 @@ def test_chat_stream_returns_sse_token_events(monkeypatch):
     """stream=True 면 토큰이 SSE 프레임(event: token)으로 흘러오고 done 으로 끝난다."""
     monkeypatch.setattr(settings, "ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setattr(
-        chat_model_module, "get_chat_model", lambda spec=None: _FakeChatModel()
+        chat_model_module, "get_chat_model", lambda spec=None: _fake_chat_model()
     )
     _patch_no_retrieval(monkeypatch)
 

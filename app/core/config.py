@@ -30,6 +30,13 @@ class Settings(BaseSettings):
     API_V1_PREFIX: str = "/api/v1"
     CORS_ORIGINS: list[str] = ["*"]
 
+    # ── 로깅 ──────────────────────────────────────────────────
+    # LOG_LEVEL: DEBUG/INFO/WARNING/ERROR. LOG_FILE: 비우면 파일 기록 끔.
+    # LOG_JSON_CONSOLE: true 면 콘솔도 JSON(운영), false 면 사람이 읽기 쉬운 컬러 출력(개발).
+    LOG_LEVEL: str = "INFO"
+    LOG_FILE: str = "logs/app.log"
+    LOG_JSON_CONSOLE: bool = False
+
     # ── 보안 / 인증 ───────────────────────────────────────────
     # SECRET_KEY: JWT 서명 키. prod에서는 반드시 강한 랜덤값으로 교체.
     SECRET_KEY: str = Field(default="change-me", min_length=8)
@@ -83,6 +90,9 @@ class Settings(BaseSettings):
     # 기본은 무료 로컬 임베딩(bge-m3, API 키 불필요). 다른 프로바이더로 바꾸려면
     # .env 에서 "openai:text-embedding-3-small" 처럼 지정한다.
     DEFAULT_EMBEDDING_MODEL: str = "st:BAAI/bge-m3"
+    # EMBEDDING_WARMUP: true 면 서버 시작 시 임베딩 모델을 미리 로드한다.
+    # → 첫 질문에서 14초 로드 대기가 사라진다(부팅이 그만큼 늦어질 뿐). MOCK 이면 자동 스킵.
+    EMBEDDING_WARMUP: bool = True
     DEFAULT_RERANK_MODEL: str = "cohere:rerank-multilingual-v3.0"
 
     # ── 관측성 (Langfuse LLM 트레이싱) ────────────────────────

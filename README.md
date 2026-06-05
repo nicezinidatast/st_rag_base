@@ -154,19 +154,20 @@ docker compose up -d neo4j              # Phase 9: GraphRAG
 - ✅ `POST /documents/ingest` 로 문서 적재 후, 그 내용을 근거로 답변(citations 포함).
 - 🔍 적재한 문서에만 있는 사실을 물어보고 정답+출처가 나오는지 확인.
 
-### Phase 4 — 하이브리드 검색(BM25) + 리랭커
+### [~] Phase 4 — 하이브리드 검색(BM25) + 리랭커 *(스켈레톤만)*
 - 🎯 검색 품질을 끌어올린다. (dense 단독 → dense+BM25 융합 → rerank)
 - 🛠 `utils/text.tokenize_ko`(형태소 분석) → `ir/vector/search.py`(BM25 추가 + RRF 융합)
   → `clients/reranker.py`(cohere) → `ir/vector/rerank.py`
 - ✅ Phase 3 와 동일 API, **검색 정확도만 향상**. 기능 추가지 동작 변화 없음.
-- 🔍 동일 질문에서 더 관련도 높은 청크가 상위로 오는지(점수/순서) 비교.
+- 📌 **현황:** 정확도 최적화 단계라 MVP 에선 본체 구현을 미룸. 함수 슬롯(`NotImplementedError`
+  스텁)만 만들어두고 Phase 5 로 진행. 정확도 개선이 필요할 때 본체를 채운다.
 
-### Phase 5 — LangGraph 워크플로로 구조화
+### [x] Phase 5 — LangGraph 워크플로로 구조화
 - 🎯 그동안 함수로 엮던 흐름을 상태머신으로 정식화한다. (analyze→retrieve→grade→generate)
 - 🛠 `workflow/state.py` → `workflow/nodes/*` 채우기 → `orchestrator/rag_agent.build_graph`
-  → `utils/streaming` 을 graph 의 `ainvoke`/`astream_events` 호출로 교체
+  → `utils/streaming` 을 graph 의 `ainvoke`/`astream`(custom 토큰) 호출로 교체
 - ✅ 외부 동작은 Phase 4 와 같되, 내부가 노드 그래프로 정리됨. grade 노드로 품질 게이트 추가 가능.
-- 🔍 기존 테스트 그대로 통과 + 각 노드 단위 테스트(`tests/test_graph/`) 추가.
+- 🔍 기존 테스트 그대로 통과 + 노드/그래프 테스트(`tests/test_graph/test_workflow.py`) 추가.
 
 ### Phase 6 — 대화 메모리 + 시맨틱 캐시 (Redis)
 - 🎯 멀티턴 맥락 유지 + 동일/유사 질문 캐싱으로 비용 절감.

@@ -9,16 +9,18 @@
 | 1 | 동기 챗 + 키 없음 개발 가드 | `568ded1` | [phase-1.md](phase-1.md) |
 | 2 | SSE 토큰 스트리밍 | `6f28409` | [phase-2.md](phase-2.md) |
 | 3 | Vector RAG(검색→출처) + Anthropic 챗 + 로컬 bge-m3 | _(미커밋)_ | [phase-3.md](phase-3.md) |
+| 4 | 하이브리드 검색(BM25)+리랭커 — **스켈레톤만** | `9cf9784` | _(스텁, 본체 미구현)_ |
+| 5 | LangGraph 워크플로 구조화(analyze→retrieve→grade→generate) | _(미커밋)_ | [phase-5.md](phase-5.md) |
 
 ## 큰 그림 (계층)
 
 ```
-요청(question) ─▶ endpoints/chat.py ─┬─ stream=false ─▶ run_chat_sync ─┐
-                                     └─ stream=true  ─▶ stream_chat ───┤
+요청(question) ─▶ endpoints/chat.py ─┬─ stream=false ─▶ run_chat_sync ─▶ graph.ainvoke
+                                     └─ stream=true  ─▶ stream_chat  ─▶ graph.astream_events(v2)
                                                                        ▼
-                          _retrieve_context(question)  ── VectorRetriever.retrieve
-                            └ embedding.aembed_query → vector_db(query_points)
-                                                                       ▼
-                          _build_messages(question, context) ─▶ ChatModel(achat/astream)
-                            └ 적재: /documents/ingest → ir/vector/ingest → embedding+upsert
+   build_graph():  analyze ─▶ retrieve ─▶ grade ─▶ generate          (Phase 5, LangGraph)
+                              │                       │
+              VectorRetriever/MockRetriever      LangChain BaseChatModel.ainvoke
+              (embedding→vector_db query)        (토큰 → on_chat_model_stream → SSE)
+   적재: /documents/ingest → ir/vector/ingest → embedding+upsert
 ```

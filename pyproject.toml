@@ -39,6 +39,8 @@ dependencies = [
     "langfuse>=2.53.0",        # LLM 트레이싱
     "sentence-transformers>=5.5.1",
     "pypdf>=6.12.2",
+    "langchain-anthropic>=1.4.4",
+    "langchain-openai>=1.2.2",
 ]
 
 # 개발 전용 의존성 (PEP 735). `uv sync` 시 기본 설치, `uv sync --no-dev` 로 제외.
