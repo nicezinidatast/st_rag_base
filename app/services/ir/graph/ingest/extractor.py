@@ -20,6 +20,9 @@ async def extract(text: str, model: str | None = None) -> Subgraph:
     raw = await llm.ainvoke(
         [("system", prompt["system"]), ("user", render(prompt["user"], text=text))]
     )
+    # with_structured_output 의 타입은 dict | BaseModel 이지만 schema=Subgraph 면
+    # 런타임엔 항상 Subgraph 인스턴스다(검증 실패 시 위에서 예외).
+    assert isinstance(raw, Subgraph)
     return _normalize(raw)
 
 
