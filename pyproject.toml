@@ -38,6 +38,9 @@ dependencies = [
     "structlog>=24.4.0",
     "langfuse>=2.53.0",        # LLM 트레이싱
     "sentence-transformers>=5.5.1",
+    # tokenizers 0.22.2 는 XLM-RoBERTa 계열(bge-m3 등) 인코딩 시 Windows 에서
+    # 네이티브 크래시(access violation). 0.22.1 정상 실측 → 해당 릴리스만 제외.
+    "tokenizers!=0.22.2",
     "pypdf>=6.12.2",
     "langchain-anthropic>=1.4.4",
     "langchain-openai>=1.2.2",
