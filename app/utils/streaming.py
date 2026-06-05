@@ -61,8 +61,8 @@ EVENT_META = "meta"     # 검색 출처/단계 등 메타데이터
 EVENT_DONE = "done"     # 스트림 종료 신호
 EVENT_ERROR = "error"   # 에러 발생
 
-# 키가 없을 때 동기/스트리밍 양쪽에서 그대로 result 로 내보내는 안내 값.
-NO_API_KEY_MESSAGE = "OpenAI API key 가 없습니다."
+# 챗 LLM(=Anthropic) 키가 없을 때 동기/스트리밍 양쪽에서 그대로 result 로 내보내는 안내 값.
+NO_API_KEY_MESSAGE = "Anthropic API key 가 없습니다."
 
 
 def sse(data: Any, event: str = EVENT_TOKEN) -> dict:
@@ -76,12 +76,70 @@ def sse(data: Any, event: str = EVENT_TOKEN) -> dict:
     return {"event": event, "data": payload}
 
 
+async def _retrieve_context(question: str, top_k: int) -> tuple[str, list[dict]]:
+    """[Phase 3] 질문으로 vector 검색 → (컨텍스트 문자열, citations).
+
+    적재 전(컬렉션 없음)이거나 결과가 없으면 ("", []) 을 돌려준다 → 컨텍스트 없이 답변.
+    검색 인프라(Qdrant/임베딩)가 없거나 실패해도 채팅 자체는 막지 않는다(검색만 건너뜀).
+    """
+    from app.core.config import settings
+    from app.services.ir.base import Retriever
+    from app.services.ir.vector import search as vsearch
+    from app.utils.logger import get_logger
+
+    if not question.strip():
+        return "", []
+
+    if settings.MOCK_RETRIEVER:
+        from app.services.ir.mock import MockRetriever
+
+        retriever: Retriever = MockRetriever()
+    else:
+        retriever = vsearch.VectorRetriever()
+
+    try:
+        chunks = await retriever.retrieve(question, top_k=top_k)
+    except Exception as e:  # noqa: BLE001  검색 실패는 치명적이지 않다 → 컨텍스트 없이 진행
+        get_logger(__name__).warning("vector retrieve skipped", error=str(e))
+        return "", []
+    if not chunks:
+        return "", []
+
+    context = "\n\n".join(f"[{i + 1}] {c.content}" for i, c in enumerate(chunks))
+    citations = [
+        {"source_id": c.source_id, "snippet": c.content[:200], "score": c.score}
+        for c in chunks
+    ]
+    return context, citations
+
+
+def _build_messages(question: str, context: str) -> list[dict]:
+    """질문(+검색 컨텍스트)을 LLM 메시지 목록으로 만든다.
+
+    클라이언트는 question 만 보내고, user 메시지 변환은 여기서 한다.
+    컨텍스트가 있으면 system 메시지로 앞에 끼운다.
+    """
+    messages: list[dict] = []
+    if context:
+        messages.append(
+            {
+                "role": "system",
+                "content": (
+                    "다음 컨텍스트를 근거로 답하라. 컨텍스트에 없으면 모른다고 답하라.\n\n"
+                    f"{context}"
+                ),
+            }
+        )
+    messages.append({"role": "user", "content": question})
+    return messages
+
+
 async def stream_chat(request: Any) -> AsyncIterator[dict]:
-    """[스트리밍 응답용 generator — Phase 2 임시 구현]
+    """[스트리밍 응답용 generator — Phase 2~3 임시 구현]
 
     원래는 LangGraph 의 astream_events 로 토큰을 흘려야 하지만(아래 미래 가이드),
-    Phase 2 에는 아직 graph 가 없다. 그래서 run_chat_sync 와 대칭으로 검색/노드 없이
-    ChatModel.astream 을 직접 호출해 토큰만 흘린다. (RAG 없음)
+    아직 graph 가 없다(Phase 5). 그래서 run_chat_sync 와 대칭으로, vector 검색으로
+    컨텍스트를 만든 뒤(Phase 3) ChatModel.astream 을 직접 호출해 토큰을 흘린다.
 
         graph = build_graph()                                    # ← Phase 5 에서 이렇게 교체
         async for ev in graph.astream_events(state, version="v2"):
@@ -95,15 +153,19 @@ async def stream_chat(request: Any) -> AsyncIterator[dict]:
     from app.clients.chat_model import get_chat_model
     from app.core.config import settings
 
-    # [개발 편의 가드] 키가 없으면 안내 값을 토큰으로 흘리고 끝낸다. (run_chat_sync 와 동일)
-    if not settings.OPENAI_API_KEY:
+    # [개발 편의 가드] 챗 LLM 키가 없으면 안내 값을 토큰으로 흘리고 끝낸다. (run_chat_sync 와 동일)
+    if not settings.ANTHROPIC_API_KEY:
         yield sse(NO_API_KEY_MESSAGE, EVENT_TOKEN)
         yield sse("[DONE]", EVENT_DONE)
         return
 
-    chat_model = get_chat_model()  # settings.DEFAULT_CHAT_MODEL 사용
-    messages = [{"role": m.role, "content": m.content} for m in request.messages]
+    spec = request.model or settings.DEFAULT_CHAT_MODEL
+    chat_model = get_chat_model(spec)
     try:
+        context, citations = await _retrieve_context(request.question, request.top_k)
+        # 사용 모델 + 출처를 먼저 meta 로 알려준다(프론트가 헤더처럼 받음).
+        yield sse({"model": spec, "citations": citations}, EVENT_META)
+        messages = _build_messages(request.question, context)
         async for token in chat_model.astream(messages):
             yield sse(token, EVENT_TOKEN)
         yield sse("[DONE]", EVENT_DONE)
@@ -112,10 +174,11 @@ async def stream_chat(request: Any) -> AsyncIterator[dict]:
 
 
 async def run_chat_sync(request: Any) -> dict:
-    """[동기 응답용 — Phase 1 임시 구현]
+    """[동기 응답용 — Phase 1~3 임시 구현]
 
-    원래는 LangGraph 를 돌려야 하지만(아래 주석), Phase 1 에는 아직 graph 가 없다.
-    그래서 검색/노드 없이 ChatModel 을 직접 호출해 답변만 만든다. (RAG 없음)
+    원래는 LangGraph 를 돌려야 하지만(아래 주석), 아직 graph 가 없다(Phase 5).
+    그래서 vector 검색으로 컨텍스트를 만든 뒤(Phase 3) ChatModel 을 직접 호출해
+    답변을 만든다.
 
         result = await graph.ainvoke(state)                          # ← Phase 5 에서 이렇게 교체
         return {"answer": result["answer"], "citations": result.get("citations", [])}
@@ -125,12 +188,15 @@ async def run_chat_sync(request: Any) -> dict:
     from app.clients.chat_model import get_chat_model
     from app.core.config import settings
 
-    # [개발 편의 가드] 키가 없으면 OpenAI 가 난해한 인증 에러를 던지므로,
-    # 대신 안내 값을 answer 로 그대로 돌려준다. (키 채우면 자동 해제)
-    if not settings.OPENAI_API_KEY:
-        return {"answer": NO_API_KEY_MESSAGE, "citations": []}
+    spec = request.model or settings.DEFAULT_CHAT_MODEL
 
-    chat_model = get_chat_model()  # settings.DEFAULT_CHAT_MODEL 사용
-    messages = [{"role": m.role, "content": m.content} for m in request.messages]
+    # [개발 편의 가드] 챗 LLM 키가 없으면 난해한 인증 에러 대신
+    # 안내 값을 answer 로 그대로 돌려준다. (키 채우면 자동 해제)
+    if not settings.ANTHROPIC_API_KEY:
+        return {"answer": NO_API_KEY_MESSAGE, "citations": [], "model": spec}
+
+    chat_model = get_chat_model(spec)
+    context, citations = await _retrieve_context(request.question, request.top_k)
+    messages = _build_messages(request.question, context)
     answer = await chat_model.achat(messages)
-    return {"answer": answer, "citations": []}
+    return {"answer": answer, "citations": citations, "model": spec}

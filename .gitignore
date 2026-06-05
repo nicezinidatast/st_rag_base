@@ -55,3 +55,9 @@ logs/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# -------- data ---------
+data/
+
+# -------- local vector store (embedded qdrant) ---------
+.qdrant_local/
