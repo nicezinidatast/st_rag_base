@@ -5,7 +5,7 @@ Jinja2 같은 템플릿 엔진은 필요해질 때 도입한다(YAGNI).
 """
 from __future__ import annotations
 
-from functools import lru_cache
+from functools import cache
 from pathlib import Path
 
 import yaml
@@ -14,7 +14,7 @@ import yaml
 _PROMPTS_DIR = Path(__file__).resolve().parents[2] / "config" / "prompts"
 
 
-@lru_cache(maxsize=None)
+@cache
 def load_prompt(name: str) -> dict:
     """'graphrag/entity_extraction' → 해당 YAML 을 dict 로 로드(프로세스당 1회)."""
     path = _PROMPTS_DIR / f"{name}.yaml"
