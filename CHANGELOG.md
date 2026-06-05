@@ -156,3 +156,45 @@
 - **트레이드오프:** SDK 직접 종속 → `langchain-*` 버전 종속으로 이동.
 - **테스트:** `pytest` 34 passed. ruff/mypy 통과. 서버 부팅 + 실제 모델 빌드 확인.
 - **커밋:** _(미커밋)_
+
+## [x] Phase 7 — 인증/RBAC + 영속화 (Postgres + Alembic)
+
+- **목표:** 사용자/대화/메시지를 DB에 남기고 접근을 보호한다. **`AUTH_ENABLED` 토글**(기본 off)로
+  기존 무인증 데모를 깨지 않음(Phase 6 graceful 철학과 일관).
+- **주요 변경:**
+  - 의존성 추가: `pyjwt`, `bcrypt` (+dev `aiosqlite`).
+  - `core/security.py` — bcrypt 해싱 + HS256 JWT 발급/검증 (passlib 미사용 — 미유지 보수).
+  - `api/deps.py` — `get_db`(async 세션), `get_current_user`(항상 강제, 401),
+    `get_optional_user`(토글형: off→None, on→강제).
+  - `endpoints/auth.py`·`schemas/auth.py` — `/register`(201/409), `/token`(JWT), `/me`.
+  - `models/conversation.py` — `session_id`(unique) 추가(Redis 세션 ↔ DB 대화 1:1).
+    `models/__init__.py` 전 모델 export.
+  - `migration/env.py` — async 엔진 + `Base.metadata` + `.env` DATABASE_URL. 초기 리비전
+    `0001` 수작성(users/conversations/messages).
+  - `services/persistence.py` — `save_exchange`: Conversation get-or-create + 메시지 2건 적재.
+    DB 장애 비치명(경고 로그 후 계속).
+  - `utils/streaming.py`·`endpoints/chat.py`·`document.py` — `user_id` 전달, 인증 부착,
+    메모리 적재 지점에서 영속화 호출(캐시 히트 포함).
+  - `config.py`/`.env.example` — `AUTH_ENABLED`(기본 false).
+- **테스트:** conftest `sqlite_db` 픽스처(임시 SQLite+NullPool 로 SessionLocal 교체).
+  `test_core/test_security.py`(4), `test_api/test_auth.py`(7: 가입/로그인/me/401/409/
+  AUTH on 차단·off 개방/메시지 row 적재). `pytest` 56 passed. alembic offline SQL 확인.
+- **커밋:** _(미커밋)_
+
+## [x] Phase 11 — 관측성: Langfuse 실연동
+
+> 진행 순서 변경: P7 다음을 **11 → 9 → 10 → 8(보류) → 12** 로 (README 로드맵 참고).
+
+- **목표:** 검색→프롬프트→토큰→비용을 한 trace 로 묶어 추적. 미들웨어 trace_id 와 연계.
+- **주요 변경:**
+  - `core/observability.py` — langfuse **v3+(OTel) API** 로 실구현: `init_langfuse`
+    (키 없으면 no-op), `get_langgraph_callback`(X-Request-ID 를 trace id 로 사용),
+    `build_graph_config`(callbacks + langfuse_session_id/user_id metadata), `shutdown=flush`.
+  - `utils/streaming.py` — 동기/스트리밍 양쪽 graph 실행에 config 주입(꺼지면 `{}`).
+  - 의존성: `langchain` 추가(langfuse.langchain 통합이 요구).
+  - `tests/conftest.py` — `auth_disabled_by_default` autouse 픽스처(테스트가 개발자
+    `.env` 의 AUTH_ENABLED 에 의존하던 갭 수정).
+- **테스트:** `test_core/test_observability.py`(3). `pytest` 59 passed.
+  Langfuse Cloud E2E: span 트리(analyze→retrieve→grade→generate→GENERATION) +
+  토큰/비용 집계 + X-Request-ID == trace id 일치 확인.
+- **커밋:** _(미커밋)_

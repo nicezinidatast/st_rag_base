@@ -12,6 +12,8 @@
 | 4 | 하이브리드 검색(BM25)+리랭커 — **스켈레톤만** | `9cf9784` | _(스텁, 본체 미구현)_ |
 | 5 | LangGraph 워크플로 구조화(analyze→retrieve→grade→generate) | _(미커밋)_ | [phase-5.md](phase-5.md) |
 | 6 | 대화 메모리 + 응답 캐시(Redis, graceful) | _(미커밋)_ | [phase-6.md](phase-6.md) |
+| 7 | 인증(JWT)/영속화(Postgres+Alembic), `AUTH_ENABLED` 토글 | _(미커밋)_ | [phase-7.md](phase-7.md) |
+| 11 | Langfuse 트레이싱 실연동 (trace_id 연계, 세션/사용자 묶음) | _(미커밋)_ | [phase-11.md](phase-11.md) |
 
 ## 큰 그림 (계층)
 

@@ -125,6 +125,7 @@ async def stream_chat(request: Any, user_id: int | None = None) -> AsyncIterator
             await persistence.save_exchange(session_id, user_id, question, cached)
             return
 
+    from app.core.observability import build_graph_config
     from app.services.orchestrator.rag_agent import build_graph
 
     state = _initial_state(request, spec)
@@ -132,10 +133,11 @@ async def stream_chat(request: Any, user_id: int | None = None) -> AsyncIterator
         state["history"] = await memory.get_history(session_id)
 
     graph = build_graph()
+    config = build_graph_config(session_id, user_id)  # Langfuse 트레이싱 (꺼져 있으면 {})
     parts: list[str] = []
     try:
         meta_sent = False
-        async for ev in graph.astream_events(state, version="v2"):
+        async for ev in graph.astream_events(state, version="v2", config=config):
             kind = ev["event"]
             if kind == "on_chat_model_stream":
                 token = ev["data"]["chunk"].content
@@ -194,13 +196,15 @@ async def run_chat_sync(request: Any, user_id: int | None = None) -> dict:
                 "session_id": session_id, "cached": True,
             }
 
+    from app.core.observability import build_graph_config
     from app.services.orchestrator.rag_agent import build_graph
 
     state = _initial_state(request, spec)
     if settings.MEMORY_ENABLED:
         state["history"] = await memory.get_history(session_id)
 
-    final = await build_graph().ainvoke(state)
+    config = build_graph_config(session_id, user_id)  # Langfuse 트레이싱 (꺼져 있으면 {})
+    final = await build_graph().ainvoke(state, config=config)
     answer = final.get("answer", "")
     citations = final.get("citations", [])
 
