@@ -8,6 +8,7 @@
 - 비용: 질문당 LLM ≤ top_k 회 (+generate 1회).
 - 파일명이 global_.py 인 이유: 'global' 은 파이썬 예약어라 import 불가.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -15,6 +16,9 @@ import asyncio
 from app.core.graph_db import get_graph_driver
 from app.services.ir.base import RetrievedChunk, Retriever
 from app.services.ir.graph.search.local import sanitize_fulltext_query
+from app.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 _NOT_RELEVANT = "관련 없음"
 
@@ -33,16 +37,31 @@ ORDER BY c.id LIMIT $top_k
 """
 
 
+def _is_relevant(partial: str) -> bool:
+    """Map 부분답변이 실답변인지 판단(= '관련 없음' 센티넬이 아닌지).
+
+    LLM 이 '관련 없음.' / '관련 없음 ' 처럼 구두점·공백을 붙여도 무관으로 본다.
+    """
+    cleaned = partial.strip().strip(" \t\n.。!?！？")
+    return bool(cleaned) and cleaned != _NOT_RELEVANT
+
+
 class GlobalGraphRetriever(Retriever):
     async def retrieve(self, query: str, top_k: int = 5, **kwargs) -> list[RetrievedChunk]:
         reports = await _fetch_reports(query, top_k)
         if not reports:
             return []
-        partials = await asyncio.gather(*(_map_one(query, r["report"]) for r in reports))
+        # 리포트 하나의 Map(LLM) 호출이 실패해도 나머지로 답하도록 부분 실패를 허용한다.
+        partials = await asyncio.gather(
+            *(_map_one(query, r["report"]) for r in reports), return_exceptions=True
+        )
+        failures = sum(isinstance(p, BaseException) for p in partials)
+        if failures:
+            logger.warning("graph_global_map_partial_fail", failed=failures, total=len(reports))
         kept = [
             (r, p)
             for r, p in zip(reports, partials, strict=True)
-            if p and p.strip() != _NOT_RELEVANT
+            if isinstance(p, str) and _is_relevant(p)
         ]
         if not kept:
             return []

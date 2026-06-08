@@ -6,6 +6,7 @@
 2. 앵커의 1-hop 이웃/관계를 모아 "엔티티 카드" 텍스트로 RetrievedChunk 조립.
 3. score 는 lucene 점수를 최댓값으로 정규화(0~1), 출처는 엔티티 source_ids.
 """
+
 from __future__ import annotations
 
 import re
@@ -17,6 +18,8 @@ _ANCHORS = 3  # 질문당 앵커 엔티티 수
 
 # lucene 쿼리 파싱 에러를 막기 위한 특수문자 제거
 _LUCENE_SPECIALS = re.compile(r'[+\-&|!(){}\[\]^"~*?:\\/]')
+# 대문자 AND/OR/NOT 은 lucene 불리언 연산자로 해석돼 파스 에러를 낼 수 있다 → 소문자로(=일반 단어).
+_LUCENE_OPERATORS = re.compile(r"\b(AND|OR|NOT)\b")
 
 _LOCAL_QUERY = """
 CALL db.index.fulltext.queryNodes('entity_fulltext', $q) YIELD node, score
@@ -31,8 +34,10 @@ ORDER BY score DESC
 
 
 def sanitize_fulltext_query(query: str) -> str:
-    """lucene 특수문자를 공백으로 치환 (global_ 도 같이 쓴다)."""
-    return _LUCENE_SPECIALS.sub(" ", query).strip()
+    """lucene 특수문자를 공백으로 치환하고 대문자 연산자를 무력화 (global_ 도 같이 쓴다)."""
+    q = _LUCENE_SPECIALS.sub(" ", query)
+    q = _LUCENE_OPERATORS.sub(lambda m: m.group(1).lower(), q)
+    return q.strip()
 
 
 class LocalGraphRetriever(Retriever):

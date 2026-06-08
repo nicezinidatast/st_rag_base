@@ -1,4 +1,5 @@
 """ir/graph/search: local(엔티티 카드 조립) + global(map-reduce) 테스트."""
+
 from __future__ import annotations
 
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
@@ -26,7 +27,12 @@ def _row(name, score, neighbors=None, source_ids=None):
 
 
 def test_sanitize_strips_lucene_specials():
-    assert sanitize_fulltext_query('서울+수도 AND "관계"?') == "서울 수도 AND  관계"
+    assert sanitize_fulltext_query('서울+수도 AND "관계"?') == "서울 수도 and  관계"
+
+
+def test_sanitize_lowercases_boolean_operators():
+    # 대문자 AND/OR/NOT 은 lucene 불리언 연산자라 일반 단어(소문자)로 낮춰 파스 에러를 막는다.
+    assert sanitize_fulltext_query("Seoul AND Busan OR Daegu") == "Seoul and Busan or Daegu"
 
 
 def test_build_chunks_normalizes_scores_and_formats_neighbors():
@@ -83,6 +89,43 @@ async def test_global_retriever_maps_filters_and_normalizes(monkeypatch):
     assert chunks[0].score == 1.0  # 최댓값 정규화
     assert chunks[0].source_id == "community:c0"
     assert chunks[0].metadata["engine"] == "graph_global"
+
+
+async def test_global_retriever_survives_partial_map_failure(monkeypatch):
+    reports = [
+        {"id": "c0", "report": "리포트0", "score": 2.0},
+        {"id": "c1", "report": "리포트1", "score": 1.0},
+    ]
+
+    async def _fake_fetch(query, top_k):
+        return reports
+
+    async def _fake_map(query, report):
+        if report == "리포트1":
+            raise RuntimeError("llm 다운")
+        return "부분답변0"
+
+    monkeypatch.setattr(global_module, "_fetch_reports", _fake_fetch)
+    monkeypatch.setattr(global_module, "_map_one", _fake_map)
+
+    chunks = await GlobalGraphRetriever().retrieve("질문")
+    assert len(chunks) == 1  # 한쪽 Map 이 죽어도 나머지로 답한다
+    assert chunks[0].content == "부분답변0"
+
+
+async def test_global_retriever_drops_sentinel_with_punctuation(monkeypatch):
+    reports = [{"id": "c0", "report": "리포트0", "score": 1.0}]
+
+    async def _fake_fetch(query, top_k):
+        return reports
+
+    async def _fake_map(query, report):
+        return "관련 없음."  # 구두점이 붙어도 무관 센티넬로 처리돼야 한다
+
+    monkeypatch.setattr(global_module, "_fetch_reports", _fake_fetch)
+    monkeypatch.setattr(global_module, "_map_one", _fake_map)
+
+    assert await GlobalGraphRetriever().retrieve("질문") == []
 
 
 async def test_global_retriever_empty_without_reports(monkeypatch):
