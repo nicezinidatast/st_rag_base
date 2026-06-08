@@ -154,13 +154,13 @@ docker compose up -d neo4j              # Phase 9: GraphRAG
 - ✅ `POST /documents/ingest` 로 문서 적재 후, 그 내용을 근거로 답변(citations 포함).
 - 🔍 적재한 문서에만 있는 사실을 물어보고 정답+출처가 나오는지 확인.
 
-### [~] Phase 4 — 하이브리드 검색(BM25) + 리랭커 *(스켈레톤만)*
-- 🎯 검색 품질을 끌어올린다. (dense 단독 → dense+BM25 융합 → rerank)
-- 🛠 `utils/text.tokenize_ko`(형태소 분석) → `ir/vector/search.py`(BM25 추가 + RRF 융합)
-  → `clients/reranker.py`(cohere) → `ir/vector/rerank.py`
-- ✅ Phase 3 와 동일 API, **검색 정확도만 향상**. 기능 추가지 동작 변화 없음.
-- 📌 **현황:** 정확도 최적화 단계라 MVP 에선 본체 구현을 미룸. 함수 슬롯(`NotImplementedError`
-  스텁)만 만들어두고 Phase 5 로 진행. 정확도 개선이 필요할 때 본체를 채운다.
+### [x] Phase 4 — 하이브리드 검색(BM25) + 리랭커
+- 🎯 검색 품질을 끌어올린다. (dense 단독 → dense+BM25 융합 → (선택) rerank)
+- 🛠 `ir/vector/search.py`(`HybridRetriever` = dense+BM25 → RRF 융합, `reciprocal_rank_fusion`)
+  → `ir/vector/rerank.py`(있으면 재정렬, 없으면 그대로) → `retrieve` 노드의 `vector` 모드가 혼합 검색 사용
+- ✅ Phase 3 와 동일 API, **검색 정확도만 향상**. `rag_mode=vector`(자동 기본값 포함)가 dense+BM25.
+- 📌 **현황:** 혼합 검색·재정렬 본체 구현. 재정렬 프로바이더(cohere/BGE 등)·대형 코퍼스용 BM25
+  색인·형태소 분석기(`tokenize_ko`) 교체는 배포별 선택이라 자리만 열어둠.
 
 ### [x] Phase 5 — LangGraph 워크플로로 구조화
 - 🎯 그동안 함수로 엮던 흐름을 상태머신으로 정식화한다. (analyze→retrieve→grade→generate)
@@ -204,11 +204,14 @@ docker compose up -d neo4j              # Phase 9: GraphRAG
 - ✅ `rag_mode="graph_local"`/`"graph_global"` 로 호출하면 그래프 기반 답변. vector 모드도 그대로.
 - 🔍 관계형 질문(local) / 광범위 요지 질문(global) 각각 테스트.
 
-### Phase 10 — 자동 라우팅 + 하이브리드 모드
-- 🎯 `rag_mode="auto"` 에서 시스템이 알아서 엔진을 고르고, 필요 시 융합한다.
-- 🛠 `orchestrator/routing.route` → `rag_agent` 의 conditional edge 분기 → `hybrid` 융합 로직
-- ✅ 사용자가 모드를 안 정해도 질문 성격에 맞는 엔진이 선택됨.
-- 🔍 여러 유형 질문을 `auto` 로 던져 적절한 엔진이 선택되는지(로그/trace) 확인.
+### [x] Phase 10 — 자동 라우팅 (하이브리드 융합 모드는 보류)
+- 🎯 `rag_mode="auto"` 면 질문 성격을 보고 엔진을 알아서 고른다.
+- 🛠 `orchestrator/routing.route`(규칙 기반, LLM 버전은 주석으로 둠) → `retrieve` 노드가
+  auto 면 `route()` 로 실제 모드를 정한 뒤 검색
+- ✅ 모드를 안 정해도 질문에 맞는 엔진 선택(요약형→graph_global, 관계형→graph_local, 그 외→혼합).
+- 📌 **보류:** vector×graph 결과를 합치는 `hybrid` 융합 모드는 안 만듦 — graph 사용 자체가
+  모든 배포에 필요한 게 아니라 배포별 선택. 필요하면 Phase 4 의 `reciprocal_rank_fusion` 재사용.
+- 🔍 여러 유형 질문을 `auto` 로 던져 로그 `node_route_auto` 의 선택 모드 확인.
 
 ### Phase 8 — 무거운 적재를 워커로 분리 (ARQ/Celery) *(보류)*
 - 🎯 대형문서 적재가 요청을 막지 않게 한다.
@@ -232,10 +235,10 @@ docker compose up -d neo4j              # Phase 9: GraphRAG
 ```
 P0 부팅
  └ P1 동기챗 ── P2 스트리밍            (LLM 계층 완성)
-        └ P3 VectorRAG ── P4 하이브리드+리랭크(스텁)   (검색 품질)
+        └ P3 VectorRAG ── P4 하이브리드+리랭크 [완료]   (검색 품질)
                └ P5 LangGraph ── P6 메모리/캐시 ── P7 인증/DB ── P11 Langfuse   [완료]
-                             └ P9 GraphRAG [완료] ── P10 라우팅/하이브리드   ← 다음
-                                    └ P8 워커(보류) ── P12 하드닝
+                             └ P9 GraphRAG ── P10 자동 라우팅 [완료]
+                                    └ P8 워커(보류) ── P12 하드닝   ← 남음
 ```
 
 - **최소 동작 데모**까지: P0→P3 (단순 Vector RAG 챗봇)
