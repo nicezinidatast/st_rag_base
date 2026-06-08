@@ -3,6 +3,7 @@
 실제 LLM/Qdrant 없이 VectorRetriever/get_chat_model 을 가짜로 끼워
 analyze→retrieve→grade→generate 흐름과 토큰 스트리밍을 검증한다.
 """
+
 from __future__ import annotations
 
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
@@ -40,7 +41,7 @@ def _chunk():
 
 
 async def test_retrieve_node_populates_context_and_citations(monkeypatch):
-    monkeypatch.setattr(search_module, "VectorRetriever", lambda: _FakeRetriever([_chunk()]))
+    monkeypatch.setattr(search_module, "HybridRetriever", lambda: _FakeRetriever([_chunk()]))
     out = await retrieve({"query": "수도?", "top_k": 5})
     assert out["context"].startswith("[1] 서울")
     assert out["citations"][0]["source_id"] == "doc-1"
@@ -48,7 +49,7 @@ async def test_retrieve_node_populates_context_and_citations(monkeypatch):
 
 
 async def test_retrieve_node_empty_on_no_results(monkeypatch):
-    monkeypatch.setattr(search_module, "VectorRetriever", lambda: _FakeRetriever([]))
+    monkeypatch.setattr(search_module, "HybridRetriever", lambda: _FakeRetriever([]))
     out = await retrieve({"query": "x", "top_k": 5})
     assert out == {"documents": [], "context": "", "citations": []}
 
@@ -95,7 +96,7 @@ async def test_generate_node_produces_answer(monkeypatch):
 
 async def test_graph_end_to_end_sync(monkeypatch):
     build_graph.cache_clear()
-    monkeypatch.setattr(search_module, "VectorRetriever", lambda: _FakeRetriever([_chunk()]))
+    monkeypatch.setattr(search_module, "HybridRetriever", lambda: _FakeRetriever([_chunk()]))
     monkeypatch.setattr(chat_model_module, "get_chat_model", lambda spec=None: _fake_chat_model())
 
     final = await build_graph().ainvoke(
@@ -108,7 +109,7 @@ async def test_graph_end_to_end_sync(monkeypatch):
 
 async def test_graph_streams_tokens_via_astream_events(monkeypatch):
     build_graph.cache_clear()
-    monkeypatch.setattr(search_module, "VectorRetriever", lambda: _FakeRetriever([_chunk()]))
+    monkeypatch.setattr(search_module, "HybridRetriever", lambda: _FakeRetriever([_chunk()]))
     monkeypatch.setattr(chat_model_module, "get_chat_model", lambda spec=None: _fake_chat_model())
 
     tokens = []
