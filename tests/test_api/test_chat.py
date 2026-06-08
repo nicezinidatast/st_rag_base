@@ -3,6 +3,7 @@
 ChatModel 과 vector 검색을 가짜로 끼워 실제 LLM/Qdrant 호출 없이
 엔드포인트 직렬화 + RAG 컨텍스트/출처 흐름을 검증한다.
 """
+
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
@@ -27,7 +28,7 @@ def _fake_chat_model(content="fake answer"):
 
 
 class _FakeRetriever:
-    """VectorRetriever 대역. 주어진 청크를 그대로 반환."""
+    """검색기 대역. 주어진 청크를 그대로 반환."""
 
     def __init__(self, chunks=None):
         self._chunks = chunks or []
@@ -37,15 +38,13 @@ class _FakeRetriever:
 
 
 def _patch_no_retrieval(monkeypatch):
-    monkeypatch.setattr(search_module, "VectorRetriever", lambda: _FakeRetriever([]))
+    monkeypatch.setattr(search_module, "HybridRetriever", lambda: _FakeRetriever([]))
 
 
 def test_chat_sync_returns_chat_response(monkeypatch):
     # 챗 LLM(Anthropic) 키가 있어야 가드를 통과해 (가짜) 모델 경로로 간다.
     monkeypatch.setattr(settings, "ANTHROPIC_API_KEY", "test-key")
-    monkeypatch.setattr(
-        chat_model_module, "get_chat_model", lambda spec=None: _fake_chat_model()
-    )
+    monkeypatch.setattr(chat_model_module, "get_chat_model", lambda spec=None: _fake_chat_model())
     _patch_no_retrieval(monkeypatch)
 
     client = TestClient(app)
@@ -66,9 +65,7 @@ def test_chat_sync_returns_chat_response(monkeypatch):
 def test_chat_sync_echoes_given_session_id(monkeypatch):
     """요청에 session_id 를 주면 응답에 그대로 유지된다."""
     monkeypatch.setattr(settings, "ANTHROPIC_API_KEY", "test-key")
-    monkeypatch.setattr(
-        chat_model_module, "get_chat_model", lambda spec=None: _fake_chat_model()
-    )
+    monkeypatch.setattr(chat_model_module, "get_chat_model", lambda spec=None: _fake_chat_model())
     _patch_no_retrieval(monkeypatch)
 
     client = TestClient(app)
@@ -84,18 +81,14 @@ def test_chat_sync_echoes_given_session_id(monkeypatch):
 def test_chat_sync_with_retrieval_includes_citations(monkeypatch):
     """검색 결과가 있으면 citations 가 응답에 실린다."""
     monkeypatch.setattr(settings, "ANTHROPIC_API_KEY", "test-key")
-    monkeypatch.setattr(
-        chat_model_module, "get_chat_model", lambda spec=None: _fake_chat_model()
-    )
+    monkeypatch.setattr(chat_model_module, "get_chat_model", lambda spec=None: _fake_chat_model())
     chunk = RetrievedChunk(
         content="서울은 대한민국의 수도이다.",
         score=0.9,
         source_id="doc-1",
         metadata={},
     )
-    monkeypatch.setattr(
-        search_module, "VectorRetriever", lambda: _FakeRetriever([chunk])
-    )
+    monkeypatch.setattr(search_module, "HybridRetriever", lambda: _FakeRetriever([chunk]))
 
     client = TestClient(app)
     resp = client.post(
@@ -158,9 +151,7 @@ def test_chat_sync_without_key_returns_guard_message(monkeypatch):
 def test_chat_stream_returns_sse_token_events(monkeypatch):
     """stream=True 면 토큰이 SSE 프레임(event: token)으로 흘러오고 done 으로 끝난다."""
     monkeypatch.setattr(settings, "ANTHROPIC_API_KEY", "test-key")
-    monkeypatch.setattr(
-        chat_model_module, "get_chat_model", lambda spec=None: _fake_chat_model()
-    )
+    monkeypatch.setattr(chat_model_module, "get_chat_model", lambda spec=None: _fake_chat_model())
     _patch_no_retrieval(monkeypatch)
 
     client = TestClient(app)

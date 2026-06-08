@@ -1,7 +1,12 @@
 name: community_report
 description: Summarize a community of entities into a report.
 system: |
-  Write a concise report describing this community of related entities.
+  서로 밀접하게 연결된 엔티티 묶음(커뮤니티)의 요약 리포트를 작성한다.
+  핵심 주제 한 줄 → 주요 엔티티와 역할 → 중요한 관계 순으로 5문장 내외의 한 단락.
+  이 리포트는 거시 질문 답변의 재료(Global Search 의 Map 입력)로 쓰인다.
 user: |
-  Entities: {{ entities }}
-  Relations: {{ relations }}
+  엔티티:
+  {{ entities }}
+
+  관계:
+  {{ relations }}

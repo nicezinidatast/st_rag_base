@@ -7,6 +7,7 @@
    payload 에 content/source_id/metadata 를 함께 저장(검색 시 그대로 복원).
 ※ 무거우면 Phase 8 에서 workers/tasks.py 로 옮긴다(지금은 엔드포인트에서 직접 호출).
 """
+
 from __future__ import annotations
 
 import uuid
@@ -16,7 +17,8 @@ from app.core.config import settings
 from app.core.vector_db import get_vector_client
 from app.utils.text import clean_text
 
-# source_id+chunk_index 로 결정적(uuid5) point id 를 만들어 재적재가 멱등이 되게 한다.
+# source_id+chunk_index 로 항상 같은(uuid5) point id 를 만든다 →
+# 같은 문서를 다시 적재해도 중복 없이 같은 자리에 덮어쓴다.
 _ID_NAMESPACE = uuid.UUID("6ba7b811-9dad-11d1-80b4-00c04fd430c8")
 
 _CHUNK_SIZE = 800

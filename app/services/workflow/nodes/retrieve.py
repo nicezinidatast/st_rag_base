@@ -6,8 +6,9 @@
   state["citations"](응답 출처) 를 채운다.
 - 검색 실패는 비치명: 컨텍스트 없이 진행한다(채팅 자체는 막지 않음).
 
-[추후] rag_mode 로 graph-local/global 분기, HybridRetriever(Phase 4) 연결.
+[Phase 9] rag_mode 로 graph_local/graph_global 분기. auto/hybrid 라우팅은 Phase 10.
 """
+
 from __future__ import annotations
 
 from app.services.workflow.state import AgentState
@@ -27,15 +28,30 @@ async def retrieve(state: AgentState) -> AgentState:
         return {"documents": [], "context": "", "citations": []}
 
     top_k = state.get("top_k", 5)
+    rag_mode = state.get("rag_mode", "auto")
+    # rag_mode=auto 면 라우터가 질문을 보고 실제 검색 모드를 정한다(MOCK 일 땐 의미 없어 건너뜀).
+    if rag_mode == "auto" and not settings.MOCK_RETRIEVER:
+        from app.services.orchestrator.routing import route
+
+        rag_mode = await route(query)
+        logger.info("node_route_auto", resolved=rag_mode)
     retriever: Retriever
     if settings.MOCK_RETRIEVER:
         from app.services.ir.mock import MockRetriever
 
         retriever = MockRetriever()
-    else:
-        retriever = vsearch.VectorRetriever()
+    elif rag_mode == "graph_local":
+        from app.services.ir.graph.search.local import LocalGraphRetriever
 
-    logger.info("node_retrieve_start", top_k=top_k, mock=settings.MOCK_RETRIEVER)
+        retriever = LocalGraphRetriever()
+    elif rag_mode == "graph_global":
+        from app.services.ir.graph.search.global_ import GlobalGraphRetriever
+
+        retriever = GlobalGraphRetriever()
+    else:  # vector → dense+BM25 혼합 검색 (hybrid=벡터+그래프 융합은 미구현이라 여기로 폴백)
+        retriever = vsearch.HybridRetriever()
+
+    logger.info("node_retrieve_start", top_k=top_k, rag_mode=rag_mode, mock=settings.MOCK_RETRIEVER)
     try:
         chunks = await retriever.retrieve(query, top_k=top_k)
     except Exception as e:  # noqa: BLE001  검색 실패는 치명적이지 않다 → 컨텍스트 없이 진행
@@ -52,8 +68,7 @@ async def retrieve(state: AgentState) -> AgentState:
     ]
     context = "\n\n".join(f"[{i + 1}] {c.content}" for i, c in enumerate(chunks))
     citations = [
-        {"source_id": c.source_id, "snippet": c.content[:200], "score": c.score}
-        for c in chunks
+        {"source_id": c.source_id, "snippet": c.content[:200], "score": c.score} for c in chunks
     ]
     logger.info(
         "node_retrieve_done",

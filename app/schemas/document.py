@@ -3,6 +3,7 @@
 [구현 가이드] targets 로 vector/graph 중 어디에 적재할지 선택. content(인라인)
 또는 uri(원격/오브젝트 스토리지) 중 하나로 본문 전달.
 """
+
 from __future__ import annotations
 
 from enum import StrEnum
@@ -17,7 +18,7 @@ class IngestTarget(StrEnum):
 
 class DocumentUpload(BaseModel):
     source_id: str = Field(
-        description="문서 식별자(재적재 시 동일 id 면 멱등 갱신).",
+        description="문서 식별자(같은 id 로 다시 적재하면 새로 만들지 않고 기존 것을 갱신).",
         examples=["css-modeling-basic-day2"],
     )
     content: str | None = Field(
@@ -26,9 +27,7 @@ class DocumentUpload(BaseModel):
     uri: str | None = Field(
         default=None, description="원격/오브젝트 스토리지 위치(인라인이 아닐 때)."
     )
-    metadata: dict = Field(
-        default_factory=dict, description="검색 시 함께 보존할 메타데이터."
-    )
+    metadata: dict = Field(default_factory=dict, description="검색 시 함께 보존할 메타데이터.")
     targets: list[IngestTarget] = Field(
         default=[IngestTarget.VECTOR], description="적재 대상 저장소."
     )

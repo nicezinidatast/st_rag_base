@@ -46,7 +46,7 @@
     지연 로드+스레드풀 인코딩, 정규화) **기본** + `OpenAIEmbedder`(선택) 구현. `@register("st")`.
   - `app/core/vector_db.py` — `get_vector_client` (지연 연결 Qdrant `AsyncQdrantClient`, lru_cache).
   - `app/services/ir/vector/ingest.py` — 청킹(고정 800/overlap 100) → 임베딩 → 컬렉션 보장 →
-    upsert(payload: content/source_id/metadata). point id 는 `uuid5(source_id:idx)` 로 멱등.
+    upsert(payload: content/source_id/metadata). point id 는 `uuid5(source_id:idx)` 라 다시 적재해도 중복 없이 덮어쓰기.
   - `app/services/ir/vector/search.py` — `VectorRetriever` dense 검색(`query_points`).
     컬렉션 없으면 `[]`.
   - `app/api/v1/endpoints/document.py` — `/documents/ingest` 가 vector ingest 직접 호출
@@ -94,14 +94,21 @@
 - **커밋:** `ce14e28` feat(clients): pass HF_TOKEN / `7cfc9b2` feat(ir): MockRetriever
   / `9cf9784` feat(ir/vector): Phase 4 hybrid 스텁
 
-## [x] Phase 4 — 하이브리드 검색(BM25) + 리랭커 *(스켈레톤만)*
+## [x] Phase 4 — 하이브리드 검색(BM25) + 리랭커
 
-- **결정:** 하이브리드/rerank 는 정확도 최적화 단계라 MVP 에는 본체 구현을 미룬다.
-  **함수 슬롯(스텁)만** 만들어 Phase 5 가 인터페이스를 참조할 수 있게 자리만 잡았다.
-- **주요 변경:** `app/services/ir/vector/search.py` — `reciprocal_rank_fusion`(RRF 융합),
-  `HybridRetriever`(dense+BM25→RRF→rerank) `NotImplementedError` 스텁 추가.
-  (기존 스텁: `rerank.py`, `clients/reranker.py` 팩토리, `utils/text.tokenize_ko` placeholder.)
-- **커밋:** `9cf9784` feat(ir/vector): scaffold Phase 4 hybrid search stubs
+- **목표:** dense(의미) 검색에 BM25(키워드) 검색을 더해 품질 향상. 한국어는 형태소 BM25 가
+  dense 가 놓치는 정확매칭(고유명사·드문 용어)을 잡아준다.
+- **주요 변경:**
+  - `app/services/ir/vector/search.py` — `reciprocal_rank_fusion`(여러 랭킹을 RRF 로 합치는
+    순수 함수, (source_id, 내용) 청크 단위) + `HybridRetriever`(dense + BM25 → RRF). BM25
+    코퍼스는 Qdrant 전체 청크를 `scroll` 로 읽어 그때그때 구성(작은~중간 코퍼스 기준).
+  - `app/services/ir/vector/rerank.py` — `rerank()` 구현. 리랭커가 없거나 실패하면 입력을
+    그대로 돌려줌(우아한 강등). 비용·키 때문에 기본 파이프라인엔 안 끼움(쓰려면 한 줄 추가).
+  - `app/services/workflow/nodes/retrieve.py` — `vector` 모드가 `HybridRetriever` 를 쓰도록
+    연결(enum 의 "VECTOR = dense+BM25" 의도대로). 프로바이더 본체(cohere 등)는 배포별 선택.
+- **테스트:** `test_ir/test_hybrid.py`(4), `test_ir/test_rerank.py`(3). 영향받은 워크플로·챗
+  테스트의 가짜 검색기 대상을 `HybridRetriever` 로 갱신.
+- **커밋:** _(미커밋, 작업 트리 — 스텁은 `9cf9784`)_
 
 ## [x] Phase 5 — LangGraph 워크플로로 구조화
 
@@ -197,4 +204,60 @@
 - **테스트:** `test_core/test_observability.py`(3). `pytest` 59 passed.
   Langfuse Cloud E2E: span 트리(analyze→retrieve→grade→generate→GENERATION) +
   토큰/비용 집계 + X-Request-ID == trace id 일치 확인.
+- **커밋:** _(미커밋)_
+
+## [x] Phase 9 — GraphRAG 파이프라인 추가
+
+> 진행 순서 변경: P7 → P11 → **P9** → P10 → P8(보류) → P12 (README 로드맵 참고).
+
+- **목표:** 엔티티/관계 그래프 기반 검색을 Vector RAG 옆에 추가한다.
+  `rag_mode="graph_local"`/`"graph_global"` 호출 시 Neo4j GraphRAG 답변. vector 모드는 그대로.
+- **주요 변경:**
+  - 의존성 추가: `igraph`, `leidenalg` (Leiden 커뮤니티 탐지).
+  - `core/graph_db.py` — `get_graph_driver`(lru_cache AsyncDriver) + `bootstrap_schema`
+    (Entity/Community UNIQUE 제약, `:RELATED{type,weight}`, `:IN_COMMUNITY`, 풀텍스트 인덱스 2종).
+    MERGE 적재(다시 넣어도 중복 없이 갱신): description 은 긴 쪽 유지, source_ids 누적.
+  - `ir/graph/ingest/extractor.py` — LLM 구조화 추출(엔티티 목록, 관계 삼중항 JSON).
+  - `ir/graph/ingest/cluster.py` — igraph + leidenalg Leiden 군집화 → Community+IN_COMMUNITY MERGE.
+    Python 실행 결정: GDS/graspologic 없이 로직 가시성·학습 용이, Neo4j 는 순수 저장소.
+  - `ir/graph/ingest/summarizer.py` — 커뮤니티 멤버 목록 → LLM 리포트 → `Community.report` 갱신.
+  - `ir/graph/ingest/__init__.py` — `ingest_graph(source_id, content, llm, driver)`:
+    extract → cluster → summarize 직렬 파이프라인.
+  - `ir/graph/search/local.py` — 풀텍스트 인덱스 앵커 → 1-hop 서브그래프 → 컨텍스트 반환.
+    앵커 = 풀텍스트 인덱스: LLM 0회, Lucene 직접 조회.
+  - `ir/graph/search/global_.py` — 커뮤니티 리포트 top_k 조회 → asyncio.gather Map →
+    관련 리포트 필터 → generate 노드 Reduce 위임. 비용 ≤ top_k+1 LLM 호출.
+  - `utils/prompts.py` + `config/prompts/graphrag/` — YAML 프롬프트 로더(LRU) +
+    `extract.yaml` / `summarize.yaml` / `map_community.yaml`.
+  - `workflow/nodes/retrieve.py` — `rag_mode` 분기: vector / graph_local / graph_global.
+    `auto`/`hybrid` 는 현재 vector 로 동작(Phase 10 에서 구현).
+  - `api/v1/endpoints/document.py` — `target` 필드(`VECTOR`|`GRAPH`) 추가.
+    `GRAPH` 이면 `ingest_graph` 직접 호출(Phase 3 패턴, 워커 이관은 Phase 8).
+  - 우아한 강등: 검색 시 Neo4j 다운 → 빈 컨텍스트로 채팅 생존(기존 try/except);
+    적재 시 Neo4j 미연결 → 503 명시 에러.
+- **테스트:** `test_core/test_graph_db.py`(2), `test_ir/test_graph_extractor.py`(2),
+  `test_ir/test_graph_cluster.py`(2), `test_ir/test_graph_summarizer.py`(1),
+  `test_ir/test_graph_ingest.py`(3), `test_ir/test_graph_search.py`(7),
+  `test_utils/test_prompts.py`(3). `pytest` 83 passed. ruff / mypy 통과.
+- **커밋:** _(미커밋)_
+
+## [x] Phase 10 — 자동 라우팅 (하이브리드 융합 모드는 보류)
+
+- **목표:** `rag_mode="auto"` 면 질문을 보고 검색 엔진을 알아서 고른다(이전엔 auto 가 그냥
+  일반 벡터 검색으로 조용히 넘어갔음).
+- **주요 변경:**
+  - `app/services/orchestrator/routing.py` — `route(query)` 구현. **규칙 기반**(질문 속 키워드):
+    "요약/전체/주요…" → graph_global, "관계/관련/누구…" → graph_local, 그 외 → vector(=혼합).
+    LLM 분류기 버전은 바로 아래 주석으로 넣어 필요 시 한 줄만 바꿔 교체(질의마다 LLM 1회라 기본 off).
+  - `app/services/workflow/nodes/retrieve.py` — `rag_mode=auto` 면 `route()` 로 모드를 정한 뒤
+    검색. MOCK 검색기일 땐 건너뜀. graph 데이터가 없어 빈 결과여도 컨텍스트 없이 답해 안전.
+- **함께 처리(Phase 9 백로그 견고성):**
+  - `ir/graph/search/global_.py` — Map(LLM) 호출을 `gather(..., return_exceptions=True)` 로
+    바꿔 리포트 하나가 실패해도 나머지로 답함. "관련 없음" 센티넬은 구두점(`관련 없음.`)이
+    붙어도 무관 처리(`_is_relevant`).
+  - `ir/graph/search/local.py` — `sanitize_fulltext_query` 가 대문자 `AND/OR/NOT`(Lucene
+    연산자)을 소문자로 낮춰 풀텍스트 파스 에러를 막음.
+- **문서 정리:** 코드 주석·문서의 "멱등" 을 "다시 적재해도 중복 없이 갱신" 같은 쉬운 말로 풀어씀.
+- **테스트:** `test_services/test_routing.py`(5), `test_ir/test_graph_search.py`(+3 견고성).
+  전체 `pytest` 99 passed. ruff / mypy 통과.
 - **커밋:** _(미커밋)_
