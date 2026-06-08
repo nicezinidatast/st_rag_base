@@ -3,6 +3,7 @@
 [Phase 9 — 비용 주의] 청크 수 + 커뮤니티 수만큼 LLM 호출이 발생한다.
 무거우면 Phase 8 에서 workers/tasks.py 로 옮긴다(vector ingest 와 동일 계획).
 """
+
 from __future__ import annotations
 
 from app.core.graph_db import ensure_schema, get_graph_driver
@@ -50,7 +51,10 @@ def _chunk(text: str, size: int = _CHUNK_SIZE, overlap: int = _CHUNK_OVERLAP) ->
 
 
 async def _upsert_subgraph(sub: Subgraph, source_id: str) -> None:
-    """추출 결과를 MERGE 로 멱등 적재. 관계의 미선언 엔티티도 MERGE 로 생성된다."""
+    """추출 결과를 MERGE 로 적재 — 같은 문서를 다시 넣어도 중복 없이 갱신만 된다.
+
+    관계가 가리키는 엔티티가 아직 없어도 MERGE 가 그 엔티티를 만들어 준다.
+    """
     async with get_graph_driver().session() as session:
         if sub.entities:
             await session.run(

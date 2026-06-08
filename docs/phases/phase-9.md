@@ -34,7 +34,7 @@
   - `entity_name_idx` — `Entity.name`
   - `entity_desc_idx` — `Entity.description`
 
-MERGE 기반 멱등 적재: 동일 `id` 재실행 시 `description` 은 긴 쪽을 유지, `source_ids` 는 누적.
+MERGE 기반 적재 — 같은 `id` 로 다시 적재해도 중복이 안 생기고 갱신만 된다: `description` 은 긴 쪽을 유지, `source_ids` 는 누적.
 
 ---
 
@@ -116,7 +116,7 @@ relations: list[{source_id, target_id, type, weight}]
 extract → cluster → summarize
 ```
 
-MERGE 멱등: 동일 문서 재적재 안전. `source_ids` 누적 누락 없음.
+MERGE 적재라 같은 문서를 다시 넣어도 안전(중복 없이 갱신). `source_ids` 누적 누락 없음.
 
 `document.py` 의 `target=GRAPH` 분기에서 직접 호출(Phase 3 와 같은 패턴, 워커 이관은 Phase 8).
 

@@ -33,7 +33,7 @@ def get_vector_client():
 
 ### `app/services/ir/vector/ingest.py` — 적재
 `clean_text` → 고정길이 청킹(800/overlap 100) → `aembed_documents` → 컬렉션 보장(dim/COSINE)
-→ `upsert`. point id 는 `uuid5(source_id:idx)` 로 **재적재 멱등**. payload: content/source_id/metadata.
+→ `upsert`. point id 는 `uuid5(source_id:idx)` 라 **같은 문서를 다시 적재해도 중복 없이 덮어쓰기**. payload: content/source_id/metadata.
 
 ### `app/services/ir/vector/search.py` — 검색
 `VectorRetriever.retrieve(query, top_k)`: `aembed_query` → `query_points` → `RetrievedChunk[]`.
