@@ -15,7 +15,7 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: rag
+      POSTGRES_DB: nicechat
     ports:
       - "5432:5432"
     volumes:

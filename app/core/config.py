@@ -30,8 +30,18 @@ class Settings(BaseSettings):
     API_V1_PREFIX: str = "/api/v1"
     CORS_ORIGINS: list[str] = ["*"]
 
-    # ── 보안 / 인증 ───────────────────────────────────────────
+    # ── 로깅 ──────────────────────────────────────────────────
+    # LOG_LEVEL: DEBUG/INFO/WARNING/ERROR. LOG_FILE: 비우면 파일 기록 끔.
+    # LOG_JSON_CONSOLE: true 면 콘솔도 JSON(운영), false 면 사람이 읽기 쉬운 컬러 출력(개발).
+    LOG_LEVEL: str = "INFO"
+    LOG_FILE: str = "logs/app.log"
+    LOG_JSON_CONSOLE: bool = False
+
+    # ── 보안 / 인증 (Phase 7) ─────────────────────────────────
+    # AUTH_ENABLED: true 면 chat/document 에 JWT 인증을 강제하고 대화를 DB에 저장.
+    # false(기본)면 기존 데모/테스트가 토큰·Postgres 없이 그대로 동작한다.
     # SECRET_KEY: JWT 서명 키. prod에서는 반드시 강한 랜덤값으로 교체.
+    AUTH_ENABLED: bool = False
     SECRET_KEY: str = Field(default="change-me", min_length=8)
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24
 
@@ -40,6 +50,21 @@ class Settings(BaseSettings):
 
     # ── Redis (세션/대화이력/시맨틱 캐시) ─────────────────────
     REDIS_URL: str = "redis://localhost:6379/0"
+
+    # ── 대화 메모리 / 캐시 (Phase 6) ──────────────────────────
+    # MEMORY_ENABLED: 세션별 대화 이력을 generate 에 주입(멀티턴).
+    # CACHE_ENABLED: 반복 질문 캐시(완전일치)로 LLM 호출 절약.
+    # Redis 가 없거나 죽어도 채팅은 막지 않는다(이력/캐시만 스킵).
+    MEMORY_ENABLED: bool = True
+    HISTORY_MAX_MESSAGES: int = 20          # 이력에 유지/주입할 최근 메시지 수
+    HISTORY_TTL_SECONDS: int = 7 * 24 * 3600
+    CACHE_ENABLED: bool = True
+    CACHE_TTL_SECONDS: int = 3600
+
+    # ── 개발/테스트 토글 ──────────────────────────────────────
+    # MOCK_RETRIEVER: true 면 실제 Vector 검색 대신 MockRetriever 가
+    # 포켓몬 가상 문서 5건을 고정 반환한다(Qdrant/임베딩 없이 RAG 흐름 점검용).
+    MOCK_RETRIEVER: bool = False
 
     # ── Vector DB (기본 Qdrant, 배포별 교체 가능) ─────────────
     VECTOR_DB_URL: str = "http://localhost:6333"
@@ -62,6 +87,9 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str | None = None
     VOYAGE_API_KEY: str | None = None          # Voyage 임베딩
     HUGGINGFACE_API_KEY: str | None = None
+    # HF Hub 토큰. sentence-transformers 모델 다운로드 시 인증에 사용
+    # (없으면 익명 요청 → rate limit 낮음 + 다운로드 느림 경고).
+    HF_TOKEN: str | None = None
     UPSTAGE_API_KEY: str | None = None         # Solar (한국어 특화)
 
     # Azure OpenAI (엔드포인트/배포명 별도 필요)
@@ -71,8 +99,13 @@ class Settings(BaseSettings):
 
     # ── 기본 모델 선택 (팩토리의 default) ─────────────────────
     # "provider:model" 또는 단순 모델명. 팩토리 구현 시 파싱 규칙을 정할 것.
-    DEFAULT_CHAT_MODEL: str = "openai:gpt-4o-mini"
-    DEFAULT_EMBEDDING_MODEL: str = "openai:text-embedding-3-small"
+    DEFAULT_CHAT_MODEL: str = "anthropic:claude-haiku-4-5-20251001"
+    # 기본은 무료 로컬 임베딩(bge-m3, API 키 불필요). 다른 프로바이더로 바꾸려면
+    # .env 에서 "openai:text-embedding-3-small" 처럼 지정한다.
+    DEFAULT_EMBEDDING_MODEL: str = "st:BAAI/bge-m3"
+    # EMBEDDING_WARMUP: true 면 서버 시작 시 임베딩 모델을 미리 로드한다.
+    # → 첫 질문에서 14초 로드 대기가 사라진다(부팅이 그만큼 늦어질 뿐). MOCK 이면 자동 스킵.
+    EMBEDDING_WARMUP: bool = True
     DEFAULT_RERANK_MODEL: str = "cohere:rerank-multilingual-v3.0"
 
     # ── 관측성 (Langfuse LLM 트레이싱) ────────────────────────

@@ -12,9 +12,11 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.api.v1.router import api_router
 from app.core.config import settings
@@ -33,9 +35,32 @@ async def lifespan(app: FastAPI):
     init_langfuse()  # Langfuse 트레이싱 초기화 (키 없거나 비활성화면 no-op)
     logger.info("startup", env=settings.ENV, app=settings.APP_NAME)
 
-    # TODO(구현): DB/Redis/Vector/Graph 풀을 열어 app.state 에 저장
+    # 임베딩 모델 워밍업: 첫 질문에서 14초 로드 대기가 걸리지 않도록 부팅 때 미리 로드.
+    # MOCK_RETRIEVER 면 임베딩을 안 쓰므로 스킵(개발 중 reload 빠르게).
+    if settings.EMBEDDING_WARMUP and not settings.MOCK_RETRIEVER:
+        from app.clients.embedding import get_embedder
+
+        try:
+            await get_embedder().aembed_query("warmup")
+            logger.info("embedding_warmup_done")
+        except Exception as e:  # noqa: BLE001  워밍업 실패가 부팅을 막아선 안 됨
+            logger.warning("embedding_warmup_failed", error=str(e))
+
+    # Redis 연결 확인(대화 이력/캐시용). 미기동이어도 부팅은 막지 않고, 가용성 플래그를 내려
+    # 이후 memory/cache 가 매 요청 연결 재시도 없이 즉시 건너뛰게 한다(요청 지연 0).
+    if settings.MEMORY_ENABLED or settings.CACHE_ENABLED:
+        from app.core import redis as _redis
+
+        try:
+            await _redis.redis_client.ping()
+            _redis.set_available(True)
+            logger.info("redis_connected")
+        except Exception as e:  # noqa: BLE001  Redis 미기동이어도 채팅은 동작(이력/캐시만 스킵)
+            _redis.set_available(False)
+            logger.warning("redis_unavailable", error=str(e))
+
+    # TODO(구현): DB/Vector/Graph 풀을 열어 app.state 에 저장
     #   app.state.db = ...
-    #   app.state.redis = ...
     #   app.state.vector = ...
     #   app.state.graph = ...
 
@@ -43,7 +68,12 @@ async def lifespan(app: FastAPI):
 
     logger.info("shutdown")
     shutdown_langfuse()  # 버퍼에 남은 트레이스 flush
-    # TODO(구현): 위에서 연 풀들을 gracefully close
+    try:
+        from app.core.redis import redis_client
+
+        await redis_client.aclose()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("redis_close_skipped", error=str(e))
 
 
 def create_app() -> FastAPI:
@@ -70,6 +100,9 @@ def create_app() -> FastAPI:
 
     # 라우터 연결
     app.include_router(api_router, prefix=settings.API_V1_PREFIX)
+
+    # 테스트 UI — 빌드 없는 단일 HTML. http://localhost:8000/ui 로 접속.
+    app.mount("/ui", StaticFiles(directory=Path(__file__).parent / "static", html=True), name="ui")
     return app
 
 

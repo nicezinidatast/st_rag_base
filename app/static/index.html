@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NICECHAT RAG 테스트 UI</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', 'Malgun Gothic', sans-serif; height: 100vh; display: flex; flex-direction: column; background: #f5f6f8; color: #222; }
+
+  header { display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: #fff; border-bottom: 1px solid #ddd; }
+  header h1 { font-size: 15px; font-weight: 600; margin-right: auto; }
+  header label { font-size: 12px; color: #666; }
+  header select, header input[type="number"] { font-size: 13px; padding: 3px 6px; border: 1px solid #ccc; border-radius: 4px; }
+  #session { font-size: 11px; color: #999; cursor: pointer; }
+
+  main { flex: 1; display: flex; min-height: 0; }
+
+  /* 왼쪽: 대화 */
+  #chat-pane { flex: 3; display: flex; flex-direction: column; min-width: 0; }
+  #messages { flex: 1; overflow-y: auto; padding: 16px; }
+  .msg { max-width: 85%; margin-bottom: 12px; padding: 10px 14px; border-radius: 10px; white-space: pre-wrap; word-break: break-word; font-size: 14px; line-height: 1.6; }
+  .msg.user { background: #2563eb; color: #fff; margin-left: auto; }
+  .msg.assistant { background: #fff; border: 1px solid #e0e0e0; }
+  .msg.error { background: #fee2e2; border: 1px solid #fca5a5; color: #991b1b; }
+  .msg .badge { display: inline-block; font-size: 10px; color: #888; margin-top: 6px; }
+
+  #input-bar { display: flex; gap: 8px; padding: 12px 16px; background: #fff; border-top: 1px solid #ddd; }
+  #question { flex: 1; font-size: 14px; padding: 8px 12px; border: 1px solid #ccc; border-radius: 6px; }
+  #send { font-size: 14px; padding: 8px 20px; border: none; border-radius: 6px; background: #2563eb; color: #fff; cursor: pointer; }
+  #send:disabled { background: #93c5fd; cursor: not-allowed; }
+
+  /* 오른쪽: 검색된 청크 */
+  #chunks-pane { flex: 2; border-left: 1px solid #ddd; background: #fff; overflow-y: auto; padding: 12px; min-width: 280px; }
+  #chunks-pane h2 { font-size: 13px; color: #555; margin-bottom: 10px; }
+  .chunk { border: 1px solid #e0e0e0; border-radius: 8px; padding: 10px; margin-bottom: 10px; font-size: 13px; }
+  .chunk .head { display: flex; justify-content: space-between; margin-bottom: 6px; }
+  .chunk .source { font-weight: 600; color: #2563eb; font-size: 12px; word-break: break-all; }
+  .chunk .score { font-size: 11px; color: #fff; background: #10b981; border-radius: 10px; padding: 1px 8px; flex-shrink: 0; }
+  .chunk .snippet { color: #444; white-space: pre-wrap; line-height: 1.5; max-height: 160px; overflow-y: auto; }
+  .empty { font-size: 12px; color: #aaa; }
+</style>
+</head>
+<body>
+<header>
+  <h1>NICECHAT RAG 테스트 UI</h1>
+  <span id="session" title="클릭하면 새 세션 시작">새 세션</span>
+  <label>rag_mode
+    <select id="rag-mode">
+      <option value="auto">auto</option>
+      <option value="vector">vector</option>
+      <option value="graph_local">graph_local</option>
+      <option value="graph_global">graph_global</option>
+      <option value="hybrid">hybrid</option>
+    </select>
+  </label>
+  <label>top_k <input id="top-k" type="number" value="5" min="1" max="50" style="width:52px" /></label>
+</header>
+
+<main>
+  <div id="chat-pane">
+    <div id="messages"></div>
+    <div id="input-bar">
+      <input id="question" placeholder="질문을 입력하세요…" autofocus />
+      <button id="send">전송</button>
+    </div>
+  </div>
+  <div id="chunks-pane">
+    <h2>📄 검색된 청크 (citations)</h2>
+    <div id="chunks"><p class="empty">질문하면 검색된 청크가 여기 표시됩니다.</p></div>
+  </div>
+</main>
+
+<script>
+const API = "/api/v1/chat";
+let sessionId = null;
+
+const $ = (id) => document.getElementById(id);
+
+$("session").onclick = () => { sessionId = null; $("session").textContent = "새 세션"; };
+$("send").onclick = send;
+$("question").addEventListener("keydown", (e) => { if (e.key === "Enter") send(); });
+
+function addMsg(role, text) {
+  const div = document.createElement("div");
+  div.className = "msg " + role;
+  div.textContent = text;
+  $("messages").appendChild(div);
+  $("messages").scrollTop = $("messages").scrollHeight;
+  return div;
+}
+
+function renderChunks(citations, cached) {
+  const box = $("chunks");
+  box.innerHTML = "";
+  if (cached) {
+    box.innerHTML = '<p class="empty">⚡ 캐시된 응답 — 검색을 건너뛰었습니다.</p>';
+    return;
+  }
+  if (!citations || citations.length === 0) {
+    box.innerHTML = '<p class="empty">검색된 청크가 없습니다.</p>';
+    return;
+  }
+  for (const c of citations) {
+    const div = document.createElement("div");
+    div.className = "chunk";
+    const score = c.score != null ? `<span class="score">${Number(c.score).toFixed(3)}</span>` : "";
+    div.innerHTML = `<div class="head"><span class="source"></span>${score}</div><div class="snippet"></div>`;
+    div.querySelector(".source").textContent = c.source_id ?? "(unknown)";
+    div.querySelector(".snippet").textContent = c.snippet ?? "";
+    box.appendChild(div);
+  }
+}
+
+async function send() {
+  const question = $("question").value.trim();
+  if (!question || $("send").disabled) return;
+  $("question").value = "";
+  $("send").disabled = true;
+  addMsg("user", question);
+  const aiDiv = addMsg("assistant", "");
+  let meta = null;
+
+  try {
+    const res = await fetch(API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        question,
+        session_id: sessionId,
+        rag_mode: $("rag-mode").value,
+        top_k: Number($("top-k").value),
+        stream: true,
+      }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+
+    // SSE 프레임 파싱. 주의: sse-starlette 는 줄바꿈으로 \r\n 을 쓴다(빈 줄 = \r\n\r\n).
+    // 스펙상 \r\n / \n / \r 모두 허용이므로 셋 다 처리한다.
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const frames = buf.split(/\r\n\r\n|\n\n|\r\r/);
+      buf = frames.pop(); // 마지막 미완성 프레임은 버퍼에 보관
+      for (const frame of frames) {
+        let event = "message";
+        const dataLines = [];
+        for (const line of frame.split(/\r\n|\n|\r/)) {
+          if (line.startsWith("event:")) event = line.slice(6).trim();
+          // "data:" 뒤 공백은 스펙대로 1개만 제거 — 토큰 맨 앞 공백(" How…")을 보존해야 한다
+          else if (line.startsWith("data:")) dataLines.push(line.slice(5).replace(/^ /, ""));
+        }
+        const data = dataLines.join("\n");
+        if (event === "token") {
+          aiDiv.textContent += data;
+          $("messages").scrollTop = $("messages").scrollHeight;
+        } else if (event === "meta") {
+          meta = JSON.parse(data);
+          if (meta.session_id) {
+            sessionId = meta.session_id;
+            $("session").textContent = "세션: " + sessionId.slice(0, 8) + "…";
+          }
+          renderChunks(meta.citations, meta.cached);
+        } else if (event === "error") {
+          aiDiv.className = "msg error";
+          aiDiv.textContent = "에러: " + data;
+        }
+      }
+    }
+    if (meta) {
+      const badge = document.createElement("span");
+      badge.className = "badge";
+      badge.textContent = `${meta.model ?? ""}${meta.cached ? " · ⚡cached" : ""}`;
+      aiDiv.appendChild(badge);
+    }
+  } catch (e) {
+    aiDiv.className = "msg error";
+    aiDiv.textContent = "요청 실패: " + e.message;
+  } finally {
+    $("send").disabled = false;
+    $("question").focus();
+  }
+}
+</script>
+</body>
+</html>

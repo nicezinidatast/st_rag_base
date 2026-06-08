@@ -52,13 +52,17 @@ ChatRequest.stream 플래그로 분기한다.
 from __future__ import annotations
 
 import json
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import Any
 
 # SSE 표준 이벤트 이름 컨벤션 (프론트와 합의해 고정해두면 좋다)
 EVENT_TOKEN = "token"   # 답변 토큰 조각
 EVENT_META = "meta"     # 검색 출처/단계 등 메타데이터
 EVENT_DONE = "done"     # 스트림 종료 신호
 EVENT_ERROR = "error"   # 에러 발생
+
+# 챗 LLM(=Anthropic) 키가 없을 때 동기/스트리밍 양쪽에서 그대로 result 로 내보내는 안내 값.
+NO_API_KEY_MESSAGE = "Anthropic API key 가 없습니다."
 
 
 def sse(data: Any, event: str = EVENT_TOKEN) -> dict:
@@ -72,42 +76,148 @@ def sse(data: Any, event: str = EVENT_TOKEN) -> dict:
     return {"event": event, "data": payload}
 
 
-async def stream_chat(request: Any) -> AsyncIterator[dict]:
-    """[스트리밍 응답용 generator — 구현 가이드]
+def _initial_state(request: Any, spec: str) -> dict:
+    """ChatRequest → LangGraph 입력 state. (rag_mode 는 StrEnum 이라 그대로 str 로 쓰임)"""
+    return {
+        "query": request.question,
+        "rag_mode": request.rag_mode,
+        "top_k": request.top_k,
+        "model": spec,
+    }
 
-    여기가 'EventSourceResponse 로 감쌀 내용물'이다. 아래 순서로 구현하면 된다:
 
-        1. graph = build_graph()
-        2. (선택) yield sse({"stage": "retrieving"}, EVENT_META)
-        3. async for ev in graph.astream_events(state, version="v2"):
-               # ev 에서 LLM 토큰만 골라:
-               #   if ev["event"] == "on_chat_model_stream":
-               #       yield sse(ev["data"]["chunk"].content, EVENT_TOKEN)
-        4. 출처/인용은 EVENT_META 로 따로 흘려보낸다.
-        5. 마지막에 yield sse("[DONE]", EVENT_DONE)
-        6. try/except 로 감싸 에러 시 yield sse(str(e), EVENT_ERROR)
-           (스트림 도중 죽으면 HTTP 상태코드로 못 알리므로 이벤트로 알려야 한다)
+async def stream_chat(request: Any, user_id: int | None = None) -> AsyncIterator[dict]:
+    """[스트리밍 응답용 generator — Phase 5+]
+
+    LangGraph 를 astream_events(version="v2") 로 돌린다. LangChain 챗 모델 호출이
+    이벤트로 흘러나오므로 별도 토큰 배관이 필요 없다:
+      · on_chain_end(name="retrieve") → 그 출력의 citations 를 EVENT_META 로 먼저 송출.
+      · on_chat_model_stream         → generate 의 LLM 토큰을 EVENT_TOKEN 으로 중계.
+    노드가 analyze→retrieve→grade→generate 순으로 도므로 meta(출처)가 토큰보다 먼저 나간다.
 
     주의: 이 함수는 HTTP 를 몰라야 한다(헤더/상태코드 X). 오직 이벤트만 yield.
+    스트림 도중 죽으면 HTTP 상태코드로 못 알리므로 에러도 이벤트로 알린다(EVENT_ERROR).
     """
-    raise NotImplementedError("stream_chat generator 미구현")
-    yield  # pragma: no cover  (async generator 로 만들기 위한 표식)
+    from app.core.config import settings
+    from app.services import cache, memory, persistence
+
+    # [개발 편의 가드] 챗 LLM 키가 없으면 안내 값을 토큰으로 흘리고 끝낸다. (run_chat_sync 와 동일)
+    if not settings.ANTHROPIC_API_KEY:
+        yield sse(NO_API_KEY_MESSAGE, EVENT_TOKEN)
+        yield sse("[DONE]", EVENT_DONE)
+        return
+
+    spec = request.model or settings.DEFAULT_CHAT_MODEL
+    session_id = request.session_id
+    question = request.question
+
+    # [캐시] 같은 질문이 캐시에 있으면 LLM 없이 저장된 답변을 토큰으로 흘린다.
+    if settings.CACHE_ENABLED:
+        cached = await cache.get_cached(question)
+        if cached is not None:
+            meta = {"model": spec, "citations": [], "session_id": session_id, "cached": True}
+            yield sse(meta, EVENT_META)
+            yield sse(cached, EVENT_TOKEN)
+            yield sse("[DONE]", EVENT_DONE)
+            if settings.MEMORY_ENABLED:
+                await memory.append_message(session_id, "user", question)
+                await memory.append_message(session_id, "assistant", cached)
+            await persistence.save_exchange(session_id, user_id, question, cached)
+            return
+
+    from app.core.observability import build_graph_config
+    from app.services.orchestrator.rag_agent import build_graph
+
+    state = _initial_state(request, spec)
+    if settings.MEMORY_ENABLED:
+        state["history"] = await memory.get_history(session_id)
+
+    graph = build_graph()
+    config = build_graph_config(session_id, user_id)  # Langfuse 트레이싱 (꺼져 있으면 {})
+    parts: list[str] = []
+    try:
+        meta_sent = False
+        async for ev in graph.astream_events(state, version="v2", config=config):
+            kind = ev["event"]
+            if kind == "on_chat_model_stream":
+                token = ev["data"]["chunk"].content
+                if isinstance(token, str) and token:
+                    parts.append(token)
+                    yield sse(token, EVENT_TOKEN)
+            elif kind == "on_chain_end" and ev.get("name") == "retrieve" and not meta_sent:
+                citations = (ev["data"].get("output") or {}).get("citations", [])
+                meta = {"model": spec, "citations": citations, "session_id": session_id}
+                yield sse(meta, EVENT_META)
+                meta_sent = True
+        yield sse("[DONE]", EVENT_DONE)
+    except Exception as e:  # noqa: BLE001  스트림 중 에러는 이벤트로만 알릴 수 있다
+        yield sse(str(e), EVENT_ERROR)
+        return
+
+    answer = "".join(parts)
+    if settings.MEMORY_ENABLED:
+        await memory.append_message(session_id, "user", question)
+        await memory.append_message(session_id, "assistant", answer)
+    if settings.CACHE_ENABLED:
+        await cache.set_cached(question, answer)
+    await persistence.save_exchange(session_id, user_id, question, answer)
 
 
-async def run_chat_sync(request: Any) -> dict:
-    """[동기 응답용 — Phase 1 임시 구현]
+async def run_chat_sync(request: Any, user_id: int | None = None) -> dict:
+    """[동기 응답용 — Phase 5]
 
-    원래는 LangGraph 를 돌려야 하지만(아래 주석), Phase 1 에는 아직 graph 가 없다.
-    그래서 검색/노드 없이 ChatModel 을 직접 호출해 답변만 만든다. (RAG 없음)
-
-        result = await graph.ainvoke(state)                          # ← Phase 5 에서 이렇게 교체
-        return {"answer": result["answer"], "citations": result.get("citations", [])}
-
+    LangGraph 를 graph.ainvoke(state) 로 끝까지 돌려 최종 state 에서 답변/출처를 꺼낸다.
     endpoints/chat.py 에서 이 반환값을 ChatResponse 로 직렬화한다.
     """
-    from app.clients.chat_model import get_chat_model
+    from app.core.config import settings
+    from app.services import cache, memory, persistence
 
-    chat_model = get_chat_model()  # settings.DEFAULT_CHAT_MODEL 사용
-    messages = [{"role": m.role, "content": m.content} for m in request.messages]
-    answer = await chat_model.achat(messages)
-    return {"answer": answer, "citations": []}
+    spec = request.model or settings.DEFAULT_CHAT_MODEL
+    session_id = request.session_id
+    question = request.question
+
+    # [개발 편의 가드] 챗 LLM 키가 없으면 난해한 인증 에러 대신
+    # 안내 값을 answer 로 그대로 돌려준다. (키 채우면 자동 해제)
+    if not settings.ANTHROPIC_API_KEY:
+        return {
+            "answer": NO_API_KEY_MESSAGE, "citations": [], "model": spec, "session_id": session_id,
+        }
+
+    # [캐시] 같은 질문이면 LLM 없이 캐시된 답변 반환(히트 시 citations 는 비움).
+    if settings.CACHE_ENABLED:
+        cached = await cache.get_cached(question)
+        if cached is not None:
+            if settings.MEMORY_ENABLED:
+                await memory.append_message(session_id, "user", question)
+                await memory.append_message(session_id, "assistant", cached)
+            await persistence.save_exchange(session_id, user_id, question, cached)
+            return {
+                "answer": cached, "citations": [], "model": spec,
+                "session_id": session_id, "cached": True,
+            }
+
+    from app.core.observability import build_graph_config
+    from app.services.orchestrator.rag_agent import build_graph
+
+    state = _initial_state(request, spec)
+    if settings.MEMORY_ENABLED:
+        state["history"] = await memory.get_history(session_id)
+
+    config = build_graph_config(session_id, user_id)  # Langfuse 트레이싱 (꺼져 있으면 {})
+    final = await build_graph().ainvoke(state, config=config)
+    answer = final.get("answer", "")
+    citations = final.get("citations", [])
+
+    if settings.MEMORY_ENABLED:
+        await memory.append_message(session_id, "user", question)
+        await memory.append_message(session_id, "assistant", answer)
+    if settings.CACHE_ENABLED:
+        await cache.set_cached(question, answer)
+    await persistence.save_exchange(session_id, user_id, question, answer)
+
+    return {
+        "answer": answer,
+        "citations": citations,
+        "model": final.get("model", spec),
+        "session_id": session_id,
+    }
